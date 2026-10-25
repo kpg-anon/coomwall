@@ -1,0 +1,30 @@
+[package]
+name = "coomwall"
+version = "0.1.0"
+description = "A live media wall for folders of images and videos"
+authors = ["kpg-anon"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name (cargo#8519).
+name = "coomwall_lib"
+# Desktop only. On the windows-gnu toolchain a Tauri cdylib overflows the PE
+# export table ("export ordinal too large"), so only the rlib is built.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+coomwall-engine = { path = "../crates/engine" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+percent-encoding = "2"
+
+# DXGI adapter enumeration for the GPU setting (same version wry uses)
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dxgi"] }

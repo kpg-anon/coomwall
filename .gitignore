@@ -1,0 +1,25 @@
+.DS_Store
+node_modules
+/build
+/.svelte-kit
+/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+
+# Rust / Tauri
+/target
+/src-tauri/target
+/src-tauri/gen/schemas
+
+*.log
+
+# Local-only docs (handoff / design notes), like comfysort
+/docs/
+/.claude/
+/AGENTS.md
+
+# Local test data: generated media, the CW_DATA_DIR profile, perf logs
+/testmedia/
+/.devdata/

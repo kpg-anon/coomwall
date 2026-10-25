@@ -1,0 +1,16 @@
+# Cargo workspace for coomwall.
+#
+#   crates/engine : pure-Rust scanning, dimension cache and the Mosaic solver
+#                   (no Tauri deps; `cargo test -p coomwall-engine`)
+#   src-tauri     : the Tauri shell, its IPC commands and the media protocol
+#
+# The split keeps engine tests out of the tauri/wry/webview2 stack, which on the
+# windows-gnu toolchain fails at test time with STATUS_ENTRYPOINT_NOT_FOUND.
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/engine"]
+
+# The solver runs on every tile change. Unoptimised it is ~20x slower, which
+# would show as lag in `tauri dev`, so it is built optimised even in dev/test.
+[profile.dev.package.coomwall-engine]
+opt-level = 3

@@ -1,0 +1,2 @@
+# Keep the working copy as written (LF); binaries are detected and left alone.
+* text=auto eol=lf
