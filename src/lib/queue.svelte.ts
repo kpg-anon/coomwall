@@ -178,6 +178,8 @@ export class MediaQueue {
     }
     this.failStreak = 0;
     if (!this.shapeOk(dims.w, dims.h)) return;
+    // excluded while it was being measured
+    if (!this.pool.includes(entry)) return;
     this.ready.push({
       key: this.keySeq++,
       path: entry.path,
@@ -227,6 +229,18 @@ export class MediaQueue {
       this.waiters.push(check);
       this.pump();
     });
+  }
+
+  /** Take a file out of this wall's supply ("remove from wall", "never show
+   * again"). What is on screen is the wall's to replace. */
+  exclude(path: string) {
+    const i = this.pool.findIndex((e) => e.path === path);
+    if (i < 0) return;
+    this.pool.splice(i, 1);
+    this.ready = this.ready.filter((m) => m.path !== path);
+    this.readyCount = this.ready.length;
+    this.reorder();
+    this.pump();
   }
 
   /** Report measurements to Rust so the next run starts with them known. */

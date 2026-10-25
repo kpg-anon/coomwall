@@ -32,4 +32,7 @@ export const I = {
   chevronDown: "",
   chevronRight: "",
   back: "",
+  external: "",
+  ban: "",
+  eyeSlash: "",
 } as const;

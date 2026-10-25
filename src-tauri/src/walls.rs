@@ -6,7 +6,10 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::utils::config::WindowConfig;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, Window, WindowEvent};
+use crate::commands::{swap_wall_layouts, AppState};
+use coomwall_engine::displays::{neighbor, Dir, Screen};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewWindow, Window, WindowEvent};
 
 pub const PREFIX: &str = "wall-";
 
@@ -78,6 +81,65 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
         let _ = w.set_focus();
     }
     Ok(opened)
+}
+
+#[derive(Serialize, Clone)]
+pub struct Moved {
+    label: String,
+    monitor: String,
+}
+
+/// Put a fullscreen window on another display: leave fullscreen, shrink so it
+/// fits inside the target, move there, fullscreen again.
+fn place(w: &WebviewWindow, m: &Monitor) -> tauri::Result<()> {
+    w.set_fullscreen(false)?;
+    w.set_size(PhysicalSize::new(640, 400))?;
+    let p = m.position();
+    w.set_position(PhysicalPosition::new(p.x + 60, p.y + 60))?;
+    w.set_fullscreen(true)
+}
+
+/// Ctrl+Shift+arrow on a wall: move it to the display on that side. A wall
+/// already there moves the other way, so the two swap; with one wall per
+/// display their layouts swap in settings.json too. The windows keep their
+/// media playing. `wall-moved` carries each moved window and its new display.
+#[tauri::command]
+pub async fn move_wall(app: AppHandle, state: State<'_, AppState>, window: WebviewWindow, dir: String) -> Result<Vec<Moved>, String> {
+    let dir = Dir::parse(&dir).ok_or("direction must be left, right, up or down")?;
+    let monitors = app.available_monitors().map_err(err)?;
+    let name_of = |w: &WebviewWindow| w.current_monitor().ok().flatten().and_then(|m| m.name().cloned());
+    let here = name_of(&window).ok_or("cannot tell which display this wall is on")?;
+    let from = monitors.iter().position(|m| m.name() == Some(&here)).ok_or("this display is no longer listed")?;
+    let screens: Vec<Screen> = monitors
+        .iter()
+        .map(|m| Screen { x: m.position().x, y: m.position().y, w: m.size().width, h: m.size().height })
+        .collect();
+    let to = neighbor(&screens, from, dir).ok_or("No display on that side.")?;
+    let target = &monitors[to];
+    let there = target.name().cloned().unwrap_or_default();
+    // another wall on the target display, if any (only wall windows: the setup
+    // window is hidden while they run)
+    let other = app
+        .webview_windows()
+        .into_iter()
+        .find(|(label, w)| label.starts_with(PREFIX) && label != window.label() && name_of(w).as_deref() == Some(there.as_str()))
+        .map(|(_, w)| w);
+    place(&window, target).map_err(err)?;
+    let mut moved = vec![Moved { label: window.label().to_string(), monitor: there.clone() }];
+    if let Some(o) = &other {
+        place(o, &monitors[from]).map_err(err)?;
+        moved.push(Moved { label: o.label().to_string(), monitor: here.clone() });
+    }
+    if window.label().starts_with(PREFIX) {
+        swap_wall_layouts(&state, &here, &there)?;
+    }
+    let _ = window.set_focus();
+    // to everyone, with the label: a JS listen() hears events emitted to any
+    // target, so emit_to(label) alone would reach the other walls too
+    for m in &moved {
+        let _ = app.emit("wall-moved", m);
+    }
+    Ok(moved)
 }
 
 /// Esc on any wall: close them all. The last one to go brings setup back.

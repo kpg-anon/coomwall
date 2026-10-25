@@ -35,14 +35,19 @@ You can switch modes from the wall with `1` `2` `3`. The shuffle carries on wher
 
 ### A wall on each display
 
-With more than one display, tick **A wall on each display** next to Mode. A small map shows your displays as Windows arranges them. Click one, then pick its mode and numbers below; untick **Wall on this display** to leave it free. Each display remembers its own mode, count, direction, speed and stillness. Sources, filters and everything under More options are shared.
+With more than one display, tick **A wall on each display** next to Mode. A small map shows your displays as Windows arranges them. Click one, then pick its mode and numbers below; untick **Wall on this display** to leave it free. Each display remembers its own mode, count, direction, speed, stillness and what it shows (Show and Shape), so one display can play videos while another shows images. Sources and everything under More options are shared.
 
 `Enter` opens every wall at once and the setup window steps aside. On the walls:
 
 - Keys go to the wall under the pointer.
 - `Space` pauses or resumes all of them, and `M` moves the one item with sound to the wall you are on.
+- `Ctrl`+`Shift`+arrow moves the wall to the display on that side. If that display has a wall, the two swap; their media keeps playing and each display keeps the layout that moved onto it.
 - `Esc` on any wall closes all of them. Closing one with `Alt+F4` leaves the others running; setup comes back when the last one closes.
 - Each wall shuffles on its own, so with a small folder the same file can appear on two displays at once.
+
+### Right-click on an item
+
+**Show in Explorer**, **Open in default app**, **Remove from wall** (gone until you go back to setup) and **Never show again**. Never show again saves the file to a list that scanning skips; setup shows how many files are hidden, and you can unhide them one by one or all at once.
 
 Everything else (image duration, a video length cap, looping short clips, playback speed, gap, crop limit, what happens under the pointer, when the wall pauses by itself, display, graphics adapter, theme) is under **More options**. Every setting is remembered.
 
@@ -55,18 +60,20 @@ Everything else (image duration, a video length cap, looping short clips, playba
 | `+` `−` | one more or one fewer tile, row or column |
 | `↑` `↓` | feed speed |
 | `D` | reverse the feed's direction |
-| `[` `]` | playback speed |
+| `[` `]` | playback speed by 5% (`Shift` for 25%), from 25% to 300% |
 | `N` | next item in the tile under the pointer |
 | `P` | pin it: it keeps playing, and no other change moves it |
 | `M` | sound on for the item under the pointer (only one item has sound) |
 | `F`, double-click | view it whole, uncropped |
 | `O` | show the file in Explorer |
+| right-click | Show in Explorer · Open in default app · Remove from wall · Never show again |
+| `Ctrl` `Shift` `←` `→` `↑` `↓` | move this wall to the display on that side; a wall there swaps with it |
 | `R` | Mosaic: lay the whole wall out again · feeds: refill |
 | `G` | outline each Mosaic change as it happens |
 | `?` | all keys |
 | `Esc` | back to setup |
 
-The interface only appears while the pointer moves. Otherwise the screen is media only.
+The interface only appears while the pointer moves, and hides again after 2.2 s (**More options → Controls hide after**, 0.5–10 s). Otherwise the screen is media only.
 
 ## How Mosaic stays still
 
@@ -110,6 +117,8 @@ On a hybrid laptop the displays are wired to the integrated GPU, and with High p
 | --- | --- | --- |
 | 1920×1200 external monitor | 36% of frames dropped, 34 fps | 6% dropped, 59 fps |
 | 3840×2400 built-in panel | 37% dropped, 35 fps | videos played at about 5% speed |
+
+With High performance, a Ribbon of 4 rows on that panel stops most videos on one frame: the RTX copy engine runs at 77% and Chromium logs `DECODER_UNDERFLOW` without an error. On Windows default the same wall plays (Iris Xe decode 31%). The wall now notices: when several visible videos have had no new frame for 4 s, the HUD says how many and points to the Graphics setting.
 
 ### Formats
 

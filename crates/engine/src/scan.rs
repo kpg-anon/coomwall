@@ -40,6 +40,8 @@ pub struct ScanReport {
     pub videos: usize,
     /// how many entries already had their dimensions cached
     pub known: usize,
+    /// entries left out because the user chose "never show again"
+    pub hidden: usize,
     pub errors: Vec<String>,
     pub millis: u64,
 }
@@ -103,9 +105,30 @@ struct Collector<'a> {
     report: ScanReport,
 }
 
+/// How two spellings of one path compare: case-insensitively on Windows.
+pub fn path_key(path: &str) -> String {
+    if cfg!(windows) { path.to_lowercase().replace('/', "\\") } else { path.to_string() }
+}
+
+impl ScanReport {
+    /// Drop the entries whose `path_key` is in `hidden`, keeping the counts right.
+    pub fn without(mut self, hidden: &HashSet<String>) -> Self {
+        if hidden.is_empty() {
+            return self;
+        }
+        let before = self.items.len();
+        self.items.retain(|e| !hidden.contains(&path_key(&e.path)));
+        self.hidden = before - self.items.len();
+        self.images = self.items.iter().filter(|e| e.kind == Kind::Image).count();
+        self.videos = self.items.len() - self.images;
+        self.known = self.items.iter().filter(|e| e.w.is_some() && e.h.is_some()).count();
+        self
+    }
+}
+
 impl Collector<'_> {
     fn key(path: &str) -> String {
-        if cfg!(windows) { path.to_lowercase().replace('/', "\\") } else { path.to_string() }
+        path_key(path)
     }
 
     fn add_url(&mut self, url: &str) {
@@ -261,6 +284,23 @@ mod tests {
         );
         assert_eq!(both.items.len(), 4, "playlist entries already found by the walk are not repeated; the URL is new");
         assert!(both.items.iter().any(|e| e.path == "https://example.com/v.mp4" && e.kind == Kind::Video));
+    }
+
+    #[test]
+    fn hidden_entries_are_dropped_and_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in ["a.png", "b.mp4", "c.mp4"] {
+            touch(&dir.path().join(n));
+        }
+        let all = scan(&[dir.path().to_string_lossy().into_owned()], false, &DimCache::default());
+        assert_eq!(all.items.len(), 3);
+        let b = all.items.iter().find(|e| e.path.ends_with("b.mp4")).unwrap().path.clone();
+        // a different spelling of the same file still matches on Windows
+        let spelled = if cfg!(windows) { b.to_uppercase() } else { b.clone() };
+        let hidden: HashSet<String> = [path_key(&spelled)].into();
+        let left = all.without(&hidden);
+        assert_eq!((left.items.len(), left.images, left.videos, left.hidden), (2, 1, 1, 1));
+        assert!(!left.items.iter().any(|e| e.path == b));
     }
 
     #[test]

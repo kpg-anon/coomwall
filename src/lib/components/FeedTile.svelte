@@ -86,7 +86,11 @@
     border-radius: 3px;
     background: var(--bg-panel);
     opacity: 0;
-    transition: opacity 300ms ease;
+    /* left/top change only when an item before it is removed */
+    transition:
+      opacity 300ms ease,
+      left 450ms ease,
+      top 450ms ease;
   }
   .item.shown {
     opacity: 1;

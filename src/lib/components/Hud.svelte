@@ -22,6 +22,8 @@
     total: number;
     unplayable: number;
     dropped: string;
+    /** many visible videos stuck waiting for frames: what to do about it */
+    stall: string;
     last: { kind: string; moved: number; crop: number; ms: number } | null;
     debug: boolean;
     toast: string;
@@ -82,6 +84,7 @@
   </div>
 
   {#if p.toast}<div class="toast">{p.toast}</div>{/if}
+  {#if p.stall}<div class="stall"><span class="nf">{I.warn}</span>{p.stall}</div>{/if}
 
   <div class="bottom">
     {#each KEYS as [k, label]}
@@ -98,12 +101,14 @@
         <dt><kbd>+</kbd> <kbd>−</kbd></dt><dd>one more or one fewer tile, row or column</dd>
         <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>feed speed · Dynamic: changes more or less often</dd>
         <dt><kbd>D</kbd></dt><dd>reverse the feed's direction</dd>
-        <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>playback speed</dd>
+        <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>playback speed by 5% · with <kbd>Shift</kbd>, by 25%</dd>
         <dt><kbd>N</kbd></dt><dd>next item in the tile under the pointer</dd>
         <dt><kbd>P</kbd></dt><dd>pin it: it keeps playing and nothing moves it</dd>
         <dt><kbd>M</kbd></dt><dd>sound on for the item under the pointer</dd>
         <dt><kbd>F</kbd> / double-click</dt><dd>view it whole</dd>
         <dt><kbd>O</kbd></dt><dd>show the file in Explorer</dd>
+        <dt>right-click</dt><dd>show in Explorer, open in the default app, remove from the wall, never show again</dd>
+        <dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></dt><dd>move this wall to the display on that side; a wall there swaps with it</dd>
         <dt><kbd>R</kbd></dt><dd>Mosaic, Dynamic: lay the whole wall out again · feeds: refill</dd>
         <dt><kbd>G</kbd></dt><dd>show where each change happens</dd>
         <dt><kbd>Esc</kbd></dt><dd>back to setup</dd>
@@ -258,6 +263,26 @@
     font-family: var(--mono);
     font-size: 12px;
     color: var(--text-primary);
+  }
+  .stall {
+    position: absolute;
+    top: 64px;
+    right: 12px;
+    max-width: 440px;
+    display: flex;
+    gap: 9px;
+    padding: 9px 12px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--orange) 60%, var(--border));
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-primary);
+  }
+  .stall .nf {
+    color: var(--orange);
+    padding-top: 2px;
   }
   .help {
     position: absolute;

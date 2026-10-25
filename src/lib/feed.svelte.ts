@@ -150,6 +150,31 @@ export class FeedController {
     }
   }
 
+  /** Take every item showing `path` out of the lanes. The items behind it
+   * slide back to close the gap (FeedTile animates `left`/`top`). */
+  remove(path: string) {
+    for (const lane of this.lanes) {
+      if (!lane.items.some((i) => i.media.path === path)) continue;
+      let shift = 0;
+      const kept: FeedItem[] = [];
+      for (const it of lane.items) {
+        if (it.media.path === path) {
+          shift += it.len + this.s.gap;
+          continue;
+        }
+        if (!shift) {
+          kept.push(it);
+          continue;
+        }
+        const pos = it.pos - shift;
+        kept.push({ ...it, pos, place: this.reverse ? this.along - pos - it.len : pos });
+      }
+      lane.items = kept;
+      lane.tail -= shift;
+      this.fill(lane);
+    }
+  }
+
   /** the item keys currently in view, for playing only what can be seen */
   visible(lane: Lane, item: FeedItem): boolean {
     return item.pos < lane.offset + this.along + 40 && item.pos + item.len > lane.offset - 40;

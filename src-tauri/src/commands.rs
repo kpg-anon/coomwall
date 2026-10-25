@@ -7,7 +7,7 @@ use coomwall_engine::cache::{DimCache, DimRecord};
 use coomwall_engine::layout::{self, Params, Placed, Plan, Rect, Tree};
 use coomwall_engine::scan::{self, ScanReport};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,9 @@ pub struct AppState {
     settings_path: PathBuf,
     /// several windows save settings (one per wall); writes take turns
     settings_lock: Mutex<()>,
+    /// files the user chose "never show again" for, as they were spelled
+    hidden: Mutex<Vec<String>>,
+    hidden_path: PathBuf,
     /// resolved once at launch; the webview's browser args were built from it
     pub gpu: GpuInfo,
 }
@@ -33,6 +36,8 @@ impl AppState {
         fs::create_dir_all(&cache_dir)?;
         let cache_path = cache_dir.join("dims.json");
         let settings_path = config.join("settings.json");
+        let hidden_path = config.join("hidden.json");
+        let hidden = fs::read(&hidden_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let saved = read_settings(&settings_path);
         let text = |key: &str, default: &str| saved.get(key).and_then(|v| v.as_str()).unwrap_or(default).to_string();
         let gpu = gpu::resolve(&text("gpu", "auto"));
@@ -41,6 +46,8 @@ impl AppState {
             cache_path,
             settings_path,
             settings_lock: Mutex::new(()),
+            hidden: Mutex::new(hidden),
+            hidden_path,
             gpu,
         })
     }
@@ -65,9 +72,10 @@ fn err(e: impl std::fmt::Display) -> String {
 #[tauri::command]
 pub async fn scan_sources(state: State<'_, AppState>, sources: Vec<String>, recursive: bool) -> Result<ScanReport, String> {
     let cache = state.cache.clone();
+    let hidden: HashSet<String> = state.hidden.lock().map_err(err)?.iter().map(|p| scan::path_key(p)).collect();
     tauri::async_runtime::spawn_blocking(move || {
         let cache = cache.lock().map_err(err)?;
-        Ok(scan::scan(&sources, recursive, &cache))
+        Ok(scan::scan(&sources, recursive, &cache).without(&hidden))
     })
     .await
     .map_err(err)?
@@ -193,6 +201,69 @@ pub fn patch_settings(state: State<'_, AppState>, patch: serde_json::Value) -> R
     let mut value = read_settings(&state.settings_path);
     coomwall_engine::patch::merge(&mut value, patch);
     write_settings(&state.settings_path, &value)
+}
+
+/// Swap two displays' entries under `walls` in settings.json: a wall moved
+/// with Ctrl+Shift+arrow takes its layout with it. A display without an
+/// entry gets the other's layout turned off.
+pub fn swap_wall_layouts(state: &AppState, a: &str, b: &str) -> Result<(), String> {
+    let _turn = state.settings_lock.lock().map_err(err)?;
+    let mut value = read_settings(&state.settings_path);
+    let Some(walls) = value.get_mut("walls").and_then(|w| w.as_object_mut()) else {
+        return Ok(());
+    };
+    let off = |mut l: serde_json::Value| {
+        l["on"] = false.into();
+        l
+    };
+    match (walls.remove(a), walls.remove(b)) {
+        (Some(la), Some(lb)) => {
+            walls.insert(b.into(), la);
+            walls.insert(a.into(), lb);
+        }
+        (Some(la), None) => {
+            walls.insert(b.into(), la.clone());
+            walls.insert(a.into(), off(la));
+        }
+        (None, Some(lb)) => {
+            walls.insert(a.into(), lb.clone());
+            walls.insert(b.into(), off(lb));
+        }
+        (None, None) => {}
+    }
+    write_settings(&state.settings_path, &value)
+}
+
+fn save_hidden(state: &AppState, list: &[String]) -> Result<(), String> {
+    let tmp = state.hidden_path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_vec_pretty(list).map_err(err)?).map_err(err)?;
+    fs::rename(&tmp, &state.hidden_path).map_err(err)
+}
+
+#[tauri::command]
+pub fn get_hidden(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(state.hidden.lock().map_err(err)?.clone())
+}
+
+/// "Never show again": later scans leave the file out.
+#[tauri::command]
+pub fn hide_item(state: State<'_, AppState>, path: String) -> Result<usize, String> {
+    let mut list = state.hidden.lock().map_err(err)?;
+    let key = scan::path_key(&path);
+    if !list.iter().any(|p| scan::path_key(p) == key) {
+        list.push(path);
+        save_hidden(&state, &list)?;
+    }
+    Ok(list.len())
+}
+
+#[tauri::command]
+pub fn unhide_items(state: State<'_, AppState>, paths: Vec<String>) -> Result<usize, String> {
+    let mut list = state.hidden.lock().map_err(err)?;
+    let drop: HashSet<String> = paths.iter().map(|p| scan::path_key(p)).collect();
+    list.retain(|p| !drop.contains(&scan::path_key(p)));
+    save_hidden(&state, &list)?;
+    Ok(list.len())
 }
 
 #[tauri::command]

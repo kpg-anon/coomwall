@@ -80,10 +80,14 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::patch_settings,
+            commands::get_hidden,
+            commands::hide_item,
+            commands::unhide_items,
             commands::gpu_info,
             commands::restart,
             walls::open_walls,
             walls::close_walls,
+            walls::move_wall,
         ])
         .run(tauri::generate_context!())
         .expect("error while running coomwall");

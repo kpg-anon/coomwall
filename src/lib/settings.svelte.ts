@@ -51,6 +51,8 @@ export interface Settings {
   volume: number;
   /** px between tiles */
   gap: number;
+  /** seconds the HUD and pointer stay up after the pointer stops */
+  hudSeconds: number;
   /** Mosaic: weight of motion against crop. Higher = calmer. */
   stillness: number;
   /** Mosaic: largest share of any media that may be cropped */
@@ -69,7 +71,7 @@ export interface Settings {
 }
 
 /** What each display's wall chooses for itself; everything else is shared. */
-export const LAYOUT_KEYS = ["mode", "tiles", "rows", "columns", "ribbonDir", "cascadeDir", "speed", "stillness", "dynamicSeconds"] as const;
+export const LAYOUT_KEYS = ["mode", "tiles", "rows", "columns", "ribbonDir", "cascadeDir", "speed", "stillness", "dynamicSeconds", "type", "shape"] as const;
 export type Layout = Pick<Settings, (typeof LAYOUT_KEYS)[number]>;
 export type WallLayout = Layout & { on: boolean };
 
@@ -102,6 +104,7 @@ export const DEFAULTS: Settings = {
   rate: 1,
   volume: 60,
   gap: 4,
+  hudSeconds: 2.2,
   stillness: 1.2,
   maxCrop: 0.3,
   audioFollowsMouse: false,
@@ -142,7 +145,14 @@ class SettingsStore {
   useWall(monitor: string) {
     this.wall = monitor;
     const l = this.s.walls[monitor];
-    if (l) Object.assign(this.s, layoutOf(l));
+    // entries saved before a key existed lack it; those keep the shared value
+    if (l) for (const k of LAYOUT_KEYS) if (l[k] !== undefined) (this.s as any)[k] = l[k];
+  }
+
+  /** The wall moved to another display (walls.rs swapped the saved layouts). */
+  movedTo(monitor: string) {
+    if (this.wall) this.wall = monitor;
+    else this.s.monitor = monitor;
   }
 
   applyTheme() {

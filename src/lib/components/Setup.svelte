@@ -26,6 +26,7 @@
   /** multi: the display the mode section edits */
   let sel = $state("");
   let wallError = $state("");
+  let showHidden = $state(false);
 
   const MODES: { id: Mode; name: string; icon: string; line: string; key: string }[] = [
     { id: "mosaic", name: "Mosaic", icon: I.th, line: "Fills the screen. Changes one block at a time, never the one you watch.", key: "1" },
@@ -75,7 +76,12 @@
 
   /** every connected display gets a layout, starting as a copy of the single wall's */
   function ensureWalls() {
-    for (const m of monitors) if (m.name && !s.walls[m.name]) s.walls[m.name] = { ...layoutOf(s), on: true };
+    for (const m of monitors) {
+      const w = s.walls[m.name];
+      if (!w) s.walls[m.name] = { ...layoutOf(s), on: true };
+      // entries saved before a setting became per display (Show, Shape) lack it
+      else for (const [k, v] of Object.entries(layoutOf(s))) if ((w as any)[k] === undefined) (w as any)[k] = v;
+    }
   }
 
   function wallSummary(w: WallLayout | undefined): string {
@@ -270,6 +276,29 @@
         <input type="checkbox" bind:checked={s.recursive} onchange={() => library.rescan()} />
         <span>Include subfolders</span>
       </label>
+      {#if library.hidden.length}
+        <div class="hidden-row">
+          <button class="link" onclick={() => (showHidden = !showHidden)} aria-expanded={showHidden}>
+            <span class="nf">{I.eyeSlash}</span>
+            {library.hidden.length} hidden {library.hidden.length === 1 ? "file" : "files"}
+            <span class="nf chev" class:open={showHidden}>{I.chevronRight}</span>
+          </button>
+          {#if showHidden}
+            <button class="link" onclick={() => library.unhide(library.hidden)}>Unhide all</button>
+          {/if}
+        </div>
+        {#if showHidden}
+          <ul class="hidden-list">
+            {#each library.hidden as p (p)}
+              <li title={p}>
+                <span class="h-name">{leaf(p)}</span>
+                <span class="s-path">{parent(p)}</span>
+                <button class="x nf" title="Unhide" onclick={() => library.unhide([p])}>{I.close}</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
       {#if library.errors.length}
         <div class="err" title={library.errors.join("\n")}>
           <span class="nf">{I.warn}</span>
@@ -311,7 +340,7 @@
             <div class="sel-info">
               <span class="sel-name">{monitorLabel(monitors[selIndex], selIndex)}</span>
               <label class="check"><input type="checkbox" bind:checked={s.walls[sel].on} /><span>Wall on this display</span></label>
-              <span class="sel-hint">Pick a display on the map, then its mode below. Sources, filters and More options are shared.</span>
+              <span class="sel-hint">Pick a display on the map, then its mode and what it shows below. Sources and More options are shared.</span>
             </div>
           {/if}
         </div>
@@ -379,7 +408,7 @@
     <section class="show">
       <Segmented
         label="Show"
-        bind:value={s.type}
+        bind:value={L.type}
         options={[
           { value: "mixed", label: "Everything" },
           { value: "videos", label: "Videos", icon: I.video },
@@ -388,7 +417,7 @@
       />
       <Segmented
         label="Shape"
-        bind:value={s.shape}
+        bind:value={L.shape}
         options={[
           { value: "any", label: "Any" },
           { value: "portrait", label: "Portrait" },
@@ -413,9 +442,18 @@
           hint="Mosaic: cut long videos"
         />
         <Range label="Loop short clips to" bind:value={s.minVideoSeconds} min={0} max={30} format={(v) => (v ? `${v} s` : "off")} hint="Mosaic" />
-        <Range label="Playback speed" bind:value={s.rate} min={0.25} max={3} step={0.25} format={(v) => `${v.toFixed(2)}×`} />
+        <Range label="Playback speed" bind:value={s.rate} min={0.25} max={3} step={0.05} format={(v) => `${v.toFixed(2)}×`} />
         <Range label="Volume" bind:value={s.volume} min={0} max={100} step={5} format={(v) => `${v}%`} hint="for the one item with sound (M)" />
         <Range label="Gap" bind:value={s.gap} min={0} max={16} format={(v) => `${v} px`} />
+        <Range
+          label="Controls hide after"
+          bind:value={s.hudSeconds}
+          min={0.5}
+          max={10}
+          step={0.1}
+          format={(v) => `${v.toFixed(1)} s`}
+          hint="the HUD and pointer, once the pointer stops"
+        />
         <Range
           label="Crop limit"
           bind:value={s.maxCrop}
@@ -475,7 +513,8 @@
             {#if gpu.high && gpu.low && gpu.high.luid !== gpu.low.luid}
               <span class="gpu-note">
                 On a laptop, the built-in screen is wired to the integrated GPU, so with High performance every frame is copied
-                across. That is fine at 1920×1200 but can be slower than Power saving on a 4K panel.
+                across. That is fine at 1920×1200, but on a 4K built-in panel most videos can stop on one frame; the wall says
+                so when it happens. Windows default avoids the copy.
               </span>
             {/if}
           {/if}
@@ -721,6 +760,53 @@
     width: 14px;
     height: 14px;
     margin: 0;
+  }
+  .hidden-row {
+    display: flex;
+    gap: 14px;
+    margin-top: 8px;
+  }
+  .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .link:hover {
+    color: var(--text-primary);
+  }
+  .hidden-list {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 4px;
+    max-height: 168px;
+    overflow-y: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-muted);
+    background: var(--bg-panel-alt);
+  }
+  .hidden-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 2px 2px 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .hidden-list .s-path {
+    max-width: none;
+    flex: 1;
+    min-width: 0;
+  }
+  .h-name {
+    color: var(--text-secondary);
+    white-space: nowrap;
   }
   .err {
     margin-top: 8px;

@@ -29,7 +29,11 @@
         await getCurrentWindow().setFocus();
         // walls.rs shows this window again once the last wall closes; the
         // walls saved their own layouts meanwhile
-        const off = await listen("walls-closed", () => settings.load());
+        const off = await listen("walls-closed", async () => {
+          await settings.load();
+          // files hidden on the walls drop out of the counts
+          library.rescan();
+        });
         if (alive) unlisten = off;
         else off();
       }
@@ -57,5 +61,12 @@
 {#if phase === "setup"}
   <Setup onstart={() => (phase = "wall")} />
 {:else if phase === "wall"}
-  <Wall multi={!!wallMonitor} onexit={() => (wallMonitor ? api.closeWalls() : (phase = "setup"))} />
+  <Wall
+    multi={!!wallMonitor}
+    onexit={() => {
+      if (wallMonitor) return api.closeWalls();
+      phase = "setup";
+      library.rescan();
+    }}
+  />
 {/if}

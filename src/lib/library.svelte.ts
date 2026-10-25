@@ -8,6 +8,8 @@ class Library {
   videos = $state(0);
   known = $state(0);
   errors = $state<string[]>([]);
+  /** "never show again" paths, from any source */
+  hidden = $state<string[]>([]);
   scanning = $state(false);
   millis = $state(0);
   private generation = 0;
@@ -15,6 +17,7 @@ class Library {
   async rescan() {
     const gen = ++this.generation;
     const sources = [...settings.s.sources];
+    api.getHidden().then((h) => gen === this.generation && (this.hidden = h)).catch(() => {});
     if (!sources.length) {
       this.items = [];
       this.images = this.videos = this.known = 0;
@@ -44,6 +47,11 @@ class Library {
     const fresh = paths.filter((p) => p && !have.has(p.toLowerCase()));
     if (!fresh.length) return;
     settings.s.sources = [...settings.s.sources, ...fresh];
+    this.rescan();
+  }
+
+  async unhide(paths: string[]) {
+    await api.unhideItems(paths);
     this.rescan();
   }
 

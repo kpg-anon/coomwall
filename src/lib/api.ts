@@ -18,6 +18,8 @@ export interface ScanReport {
   images: number;
   videos: number;
   known: number;
+  /** left out because they are on the "never show again" list */
+  hidden: number;
   errors: string[];
   millis: number;
 }
@@ -121,6 +123,13 @@ export const api = {
   /** one fullscreen wall per named display; hides the setup window */
   openWalls: (monitors: string[]) => invoke<number>("open_walls", { monitors }),
   closeWalls: () => invoke<void>("close_walls"),
+  /** move the calling window's wall to the display on that side (swapping with a wall there) */
+  moveWall: (dir: "left" | "right" | "up" | "down") => invoke<{ label: string; monitor: string }[]>("move_wall", { dir }),
+
+  getHidden: () => invoke<string[]>("get_hidden"),
+  /** "never show again"; returns how many are hidden */
+  hideItem: (path: string) => invoke<number>("hide_item", { path }),
+  unhideItems: (paths: string[]) => invoke<number>("unhide_items", { paths }),
   gpuInfo: () => invoke<GpuInfo>("gpu_info"),
   restart: () => invoke<void>("restart"),
 };

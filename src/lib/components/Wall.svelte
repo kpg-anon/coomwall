@@ -3,12 +3,14 @@
   // modes, the HUD and every key. Switching mode (1/2/3) keeps the queue, so
   // the shuffle carries on where it was. With a wall on each display (multi),
   // this is one of several windows, already fullscreen on its display, and
-  // walls.ts keeps pause, sound and focus in step with the others.
+  // walls.ts keeps pause, sound, focus and removed files in step with the
+  // others. Ctrl+Shift+arrow moves the wall to the next display (walls.rs).
   import { onMount } from "svelte";
   import { getCurrentWindow, availableMonitors } from "@tauri-apps/api/window";
   import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
-  import { revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { isUrl, type Rect } from "$lib/api";
+  import { listen } from "@tauri-apps/api/event";
+  import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { api, isUrl, type GpuInfo, type Rect } from "$lib/api";
   import { settings, LIMITS, type Mode } from "$lib/settings.svelte";
   import { library } from "$lib/library.svelte";
   import { MediaQueue, type Media } from "$lib/queue.svelte";
@@ -18,6 +20,7 @@
   import FeedView from "./FeedView.svelte";
   import Hud from "./Hud.svelte";
   import Lightbox from "./Lightbox.svelte";
+  import ContextMenu, { type MenuAction } from "./ContextMenu.svelte";
   import { linkWalls } from "$lib/walls";
 
   let { onexit, multi = false }: { onexit: () => void; multi?: boolean } = $props();
@@ -42,11 +45,16 @@
   let hover = $state.raw<Media | null>(null);
   let audioKey = $state<number | null>(null);
   let lightbox = $state.raw<Media | null>(null);
+  /** right-click menu, for the item under the pointer when it opened */
+  let menu = $state.raw<{ media: Media; x: number; y: number } | null>(null);
   let hudVisible = $state(true);
   let help = $state(false);
   let debug = $state(false);
   let toast = $state("");
   let dropped = $state("0% dropped");
+  /** set while many visible videos are stuck waiting for decoded frames */
+  let stall = $state("");
+  let gpu: GpuInfo | null = null;
   let hudTimer: ReturnType<typeof setTimeout> | undefined;
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -58,6 +66,7 @@
         pause: (p) => (paused = p),
         soundElsewhere: () => (audioKey = null),
         focusAny: (f) => (focusedAny = f),
+        remove: (path) => dropHere(path),
       })
     : null;
 
@@ -89,10 +98,10 @@
     toastTimer = setTimeout(() => (toast = ""), 1500);
   }
 
-  function poke() {
+  function poke(ms = s.hudSeconds * 1000) {
     hudVisible = true;
     clearTimeout(hudTimer);
-    hudTimer = setTimeout(() => (hudVisible = false), 2200);
+    hudTimer = setTimeout(() => (hudVisible = false), ms);
   }
 
   function setMode(m: Mode) {
@@ -115,12 +124,63 @@
     say(`${n} ${key === "tiles" ? (n === 1 ? "tile" : "tiles") : key === "rows" ? (n === 1 ? "row" : "rows") : n === 1 ? "column" : "columns"}`);
   }
 
+  /** Take a file off this wall: out of the queue, and replaced wherever it shows. */
+  function dropHere(path: string) {
+    queue.exclude(path);
+    if (lightbox?.path === path) lightbox = null;
+    if (hover?.path === path) hover = null;
+    if (menu?.media.path === path) menu = null;
+    if (mosaic) for (const t of mosaic.tiles) if (t.media.path === path && !t.leaving) mosaic.next(t.id);
+    feed?.remove(path);
+  }
+
+  /** "Remove from wall" (this session) or "Never show again" (saved; scans skip it) */
+  async function drop(m: Media, forGood: boolean) {
+    if (forGood) {
+      try {
+        await api.hideItem(m.path);
+      } catch (e) {
+        return say(String(e));
+      }
+    }
+    // every wall, this one included, hears it and drops the file
+    if (link) link.remove(m.path);
+    else dropHere(m.path);
+    say(forGood ? "hidden for good · undo in setup" : "removed from the wall");
+  }
+
+  function act(a: MenuAction, m: Media) {
+    if (a === "reveal") revealItemInDir(m.path).catch((e) => say(String(e)));
+    else if (a === "open") (isUrl(m.path) ? openUrl(m.path) : openPath(m.path)).catch((e) => say(String(e)));
+    else drop(m, a === "hide");
+  }
+
+  function contextmenu(e: MouseEvent) {
+    e.preventDefault();
+    const target = lightbox ?? hover;
+    menu = target ? { media: target, x: e.clientX, y: e.clientY } : null;
+    poke();
+  }
+
+  const DISPLAY_NAME = /^\\\\\.\\/;
+
+  /** Ctrl+Shift+arrow: this wall to the display on that side, swapping with a wall there */
+  function moveWall(dir: "left" | "right" | "up" | "down") {
+    api.moveWall(dir).catch((e) => say(String(e)));
+  }
+
   function key(e: KeyboardEvent) {
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
     const k = e.key;
+    if (e.ctrlKey && e.shiftKey && !e.altKey && k.startsWith("Arrow")) {
+      e.preventDefault();
+      poke();
+      return moveWall(k.slice(5).toLowerCase() as "left" | "right" | "up" | "down");
+    }
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     poke();
     if (k === "Escape") {
-      if (lightbox) lightbox = null;
+      if (menu) menu = null;
+      else if (lightbox) lightbox = null;
       else if (help) help = false;
       else onexit();
       return;
@@ -149,8 +209,10 @@
       s.speed = Math.round(Math.max(10, Math.min(1200, s.speed * (k === "ArrowUp" ? 1.2 : 1 / 1.2))));
       return say(`${s.speed} px/s`);
     }
-    if (k === "[" || k === "]") {
-      s.rate = Math.max(0.25, Math.min(3, Math.round((s.rate + (k === "]" ? 0.25 : -0.25)) * 100) / 100));
+    // [ ] by 5%, { } (with Shift) by 25%
+    if (k === "[" || k === "]" || k === "{" || k === "}") {
+      const step = (k === "]" || k === "}" ? 1 : -1) * (k === "{" || k === "}" ? 0.25 : 0.05);
+      s.rate = Math.max(0.25, Math.min(3, Math.round((s.rate + step) * 100) / 100));
       return say(`playback ${s.rate.toFixed(2)}×`);
     }
     const lower = k.toLowerCase();
@@ -227,6 +289,51 @@
       lost += q.droppedVideoFrames;
     }
     dropped = total ? `${((lost / total) * 100).toFixed(1)}% dropped` : "0% dropped";
+    checkStall();
+  }
+
+  // A video that should be playing but has had no new frame for 4 s, with its
+  // data already loaded (readyState below HAVE_FUTURE_DATA). Chromium logs
+  // this as DECODER_UNDERFLOW and raises no error, so the wall checks for it:
+  // on this laptop it is what the RTX 4070 does when its frames must be copied
+  // to the Iris Xe that drives the built-in panel.
+  const lastFrame = new WeakMap<HTMLVideoElement, { t: number; at: number }>();
+  let stallSamples = 0;
+  let clearSamples = 0;
+
+  function checkStall() {
+    if (wallPaused) return;
+    const now = performance.now();
+    let live = 0;
+    let stuck = 0;
+    for (const v of document.querySelectorAll("video")) {
+      if (v.paused || v.ended) continue;
+      const r = v.getBoundingClientRect();
+      if (r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) continue;
+      live++;
+      const last = lastFrame.get(v);
+      if (!last || last.t !== v.currentTime) lastFrame.set(v, { t: v.currentTime, at: now });
+      else if (now - last.at >= 4000 && v.readyState < 3) stuck++;
+    }
+    if (stuck >= 3 && stuck >= live * 0.2) {
+      clearSamples = 0;
+      if (++stallSamples < 2) return;
+      const first = !stall;
+      stall = stallMessage(stuck, live);
+      // keep the HUD up long enough to read it the first time
+      if (first) poke(8000);
+    } else if (stall && ++clearSamples >= 2) {
+      stall = "";
+      stallSamples = 0;
+    } else if (!stall) stallSamples = 0;
+  }
+
+  function stallMessage(stuck: number, live: number): string {
+    const head = `${stuck} of ${live} videos are stuck on one frame, waiting for the GPU.`;
+    const chosen = gpu?.chosen?.name.replace(/\((R|TM)\)/g, "").replace(/\s+/g, " ").trim();
+    if (chosen && gpu?.high && gpu?.low && gpu.high.luid !== gpu.low.luid)
+      return `${head} Graphics is set to ${chosen}; when this display is wired to the other GPU, every frame is copied across. Try Graphics: Windows default (setup → More options), then restart.`;
+    return `${head} Fewer rows or tiles lowers the load.`;
   }
 
   /** multi: keys go to the wall under the pointer */
@@ -272,12 +379,23 @@
       .catch(() => {});
     window.addEventListener("keydown", key);
     window.addEventListener("resize", resized);
+    // walls.rs names each window a Ctrl+Shift+arrow moved; every window hears it
+    let unmoved: (() => void) | undefined;
+    listen<{ label: string; monitor: string }>("wall-moved", (e) => {
+      if (e.payload.label !== win.label) return;
+      settings.movedTo(e.payload.monitor);
+      say(`moved to ${e.payload.monitor.replace(DISPLAY_NAME, "")}`);
+    })
+      .then((f) => (alive ? (unmoved = f) : f()))
+      .catch(() => {});
     const frames = setInterval(sampleFrames, 2000);
+    api.gpuInfo().then((g) => (gpu = g)).catch(() => {});
     poke();
     if (import.meta.env.DEV) (window as any).__cwWall = { mosaic: () => mosaic, feed: () => feed, queue, setMode };
     return () => {
       alive = false;
       unfocus?.();
+      unmoved?.();
       window.removeEventListener("keydown", key);
       window.removeEventListener("resize", resized);
       clearInterval(frames);
@@ -308,7 +426,7 @@
   const direction = $derived(mode === "ribbon" ? (s.ribbonDir === "left" ? "← left" : "→ right") : s.cascadeDir === "up" ? "↑ up" : "↓ down");
 </script>
 
-<div class="wall" class:hide-cursor={!hudVisible && !help} onpointermove={moved} role="presentation">
+<div class="wall" class:hide-cursor={!hudVisible && !help && !menu} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
   {#if mosaic}
     <MosaicView ctl={mosaic} {s} paused={wallPaused} {audioKey} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={(m) => (lightbox = m)} />
   {:else if feed}
@@ -335,6 +453,10 @@
     />
   {/if}
 
+  {#if menu}
+    <ContextMenu media={menu.media} x={menu.x} y={menu.y} onaction={(a) => menu && act(a, menu.media)} onclose={() => (menu = null)} />
+  {/if}
+
   <Hud
     visible={hudVisible}
     {help}
@@ -351,6 +473,7 @@
     total={queue.total}
     unplayable={queue.unplayable}
     {dropped}
+    {stall}
     last={mosaic?.last ?? null}
     {debug}
     {toast}
