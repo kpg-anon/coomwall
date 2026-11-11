@@ -1,25 +1,27 @@
 <script lang="ts">
-  // The running wall: fullscreen on the chosen monitor, one of the three
-  // modes, the HUD and every key. Switching mode (1/2/3) keeps the queue, so
-  // the shuffle carries on where it was. With a wall on each display (multi),
+  // The running wall: fullscreen on the chosen monitor, one of the six modes,
+  // the HUD and every key. Switching mode (1-6) keeps the queue, so the
+  // shuffle carries on where it was. With a wall on each display (multi),
   // this is one of several windows, already fullscreen on its display, and
-  // walls.ts keeps pause, sound, focus and removed files in step with the
-  // others. Ctrl+Shift+arrow moves the wall to the next display (walls.rs).
+  // walls.ts keeps sound, focus and removed files in step with the others.
+  // Ctrl+Shift+arrow moves the wall to the next display (walls.rs).
   import { onMount } from "svelte";
   import { getCurrentWindow, availableMonitors } from "@tauri-apps/api/window";
   import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
   import { listen } from "@tauri-apps/api/event";
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { api, isUrl, type GpuInfo, type Rect } from "$lib/api";
-  import { settings, LIMITS, type Mode } from "$lib/settings.svelte";
+  import { settings, LIMITS, MODE_NAMES, type Mode } from "$lib/settings.svelte";
   import { library } from "$lib/library.svelte";
-  import { MediaQueue, type Media } from "$lib/queue.svelte";
+  import { MediaQueue, measureEntry, type Media } from "$lib/queue.svelte";
   import { MosaicController } from "$lib/mosaic.svelte";
+  import { GridController } from "$lib/grid.svelte";
+  import { gridLabel, validSpans } from "$lib/grid";
   import { FeedController } from "$lib/feed.svelte";
   import MosaicView from "./MosaicView.svelte";
   import FeedView from "./FeedView.svelte";
   import Hud from "./Hud.svelte";
-  import Lightbox from "./Lightbox.svelte";
+  import Viewer from "./Viewer.svelte";
   import ContextMenu, { type MenuAction } from "./ContextMenu.svelte";
   import { linkWalls } from "$lib/walls";
 
@@ -27,24 +29,30 @@
 
   const s = settings.s;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const MODE_NAMES: Record<Mode, string> = { mosaic: "Mosaic", ribbon: "Ribbon", cascade: "Cascade", dynamic: "Dynamic" };
   const isFeed = (m: Mode) => m === "ribbon" || m === "cascade";
+  /** keys that still reach the wall while one item is open in the viewer */
+  const VIEWER_PASS = new Set(["m", "o", "[", "]", "{", "}", "?", "h", "t"]);
 
   const queue = new MediaQueue(library.items, s.type, s.shape, s.shuffle);
   let w = $state(0);
   let h = $state(0);
   let mode = $state<Mode>(s.mode);
-  let mosaic = $state.raw<MosaicController | null>(null);
+  /** Mosaic, Dynamic and Centre (MosaicController) or Grid */
+  let tiled = $state.raw<MosaicController | GridController | null>(null);
   let feed = $state.raw<FeedController | null>(null);
   let feedGen = $state(0);
-  /** Space */
+  /** Space: this wall. Shift+Space: every wall. */
   let paused = $state(false);
   let focused = $state(true);
   /** multi: whether any of the walls has focus */
   let focusedAny = $state(true);
   let hover = $state.raw<Media | null>(null);
   let audioKey = $state<number | null>(null);
-  let lightbox = $state.raw<Media | null>(null);
+  /** the item open in the viewer, and where its tile's video was */
+  let lightbox = $state.raw<{ media: Media; time: number } | null>(null);
+  let viewer = $state<Viewer>();
+  /** Centre mode's middle item, measured from `s.center` */
+  let centerMedia = $state.raw<Media | null>(null);
   /** right-click menu, for the item under the pointer when it opened */
   let menu = $state.raw<{ media: Media; x: number; y: number } | null>(null);
   let hudVisible = $state(true);
@@ -67,6 +75,10 @@
         soundElsewhere: () => (audioKey = null),
         focusAny: (f) => (focusedAny = f),
         remove: (path) => dropHere(path),
+        onTop: (on) => {
+          s.alwaysOnTop = on;
+          applyOnTop();
+        },
       })
     : null;
 
@@ -76,26 +88,33 @@
   }
 
   function build() {
-    mosaic?.destroy();
+    tiled?.destroy();
     feed?.destroy();
-    mosaic = null;
+    tiled = null;
     feed = null;
-    if (mode === "mosaic" || mode === "dynamic") {
-      const m = new MosaicController(queue, s, bounds(), mode === "dynamic");
-      mosaic = m;
-      m.start(s.tiles);
+    queue.hold(null);
+    if (mode === "grid") {
+      const g = new GridController(queue, s, bounds());
+      tiled = g;
+      g.start();
+    } else if (!isFeed(mode)) {
+      const c = mode === "center" ? centerMedia : null;
+      queue.hold(c?.path ?? null);
+      const m = new MosaicController(queue, s, bounds(), mode === "dynamic", c);
+      tiled = m;
+      m.start(c ? s.centerTiles : s.tiles);
     } else {
-      const f = new FeedController(queue, s, mode, mode === "ribbon" ? s.rows : s.columns, { w, h });
+      const f = new FeedController(queue, s, mode as "ribbon" | "cascade", mode === "ribbon" ? s.rows : s.columns, { w, h });
       f.build();
       feed = f;
       feedGen++;
     }
   }
 
-  function say(msg: string) {
+  function say(msg: string, ms = 1500) {
     toast = msg;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toast = ""), 1500);
+    toastTimer = setTimeout(() => (toast = ""), ms);
   }
 
   function poke(ms = s.hudSeconds * 1000) {
@@ -106,6 +125,7 @@
 
   function setMode(m: Mode) {
     if (m === mode) return;
+    if (m === "center" && !centerMedia) return say("Centre: hover an item and press C, or choose a file in setup", 3200);
     mode = m;
     s.mode = m;
     hover = null;
@@ -119,18 +139,34 @@
     const n = Math.max(lo, Math.min(hi, s[key] + delta));
     if (n === s[key]) return;
     s[key] = n;
-    if (mosaic) mosaic.setCount(n);
+    if (tiled instanceof GridController) regrid();
+    else if (tiled) tiled.setCount(n);
     else build();
-    say(`${n} ${key === "tiles" ? (n === 1 ? "tile" : "tiles") : key === "rows" ? (n === 1 ? "row" : "rows") : n === 1 ? "column" : "columns"}`);
+    const one = n === 1;
+    const noun = { tiles: one ? "tile" : "tiles", rows: one ? "row" : "rows", columns: one ? "column" : "columns", gridCols: "", gridRows: "", centerTiles: "around the centre" }[key];
+    say(key === "gridCols" ? `grid ${s.gridCols}×${s.gridRows}` : `${n} ${noun}`);
+  }
+
+  /** Grid: the columns or rows changed. Merged tiles that no longer fit are dropped. */
+  function regrid() {
+    s.gridSpans = validSpans(s.gridCols, s.gridRows, s.gridSpans);
+    if (tiled instanceof GridController) tiled.relayout();
   }
 
   /** Take a file off this wall: out of the queue, and replaced wherever it shows. */
   function dropHere(path: string) {
     queue.exclude(path);
-    if (lightbox?.path === path) lightbox = null;
+    if (lightbox?.media.path === path) lightbox = null;
     if (hover?.path === path) hover = null;
     if (menu?.media.path === path) menu = null;
-    if (mosaic) for (const t of mosaic.tiles) if (t.media.path === path && !t.leaving) mosaic.next(t.id);
+    if (centerMedia?.path === path) {
+      // the middle item itself: Centre has nothing to show, so back to Mosaic
+      centerMedia = null;
+      s.center = "";
+      if (mode === "center") setMode("mosaic");
+      return;
+    }
+    if (tiled) for (const t of tiled.tiles) if (t.media.path === path && !t.leaving) tiled.next(t.id);
     feed?.remove(path);
   }
 
@@ -149,17 +185,46 @@
     say(forGood ? "hidden for good · undo in setup" : "removed from the wall");
   }
 
+  /** C, or "Play in the centre": this item becomes Centre mode's middle item. */
+  function center(m: Media) {
+    if (centerMedia?.path === m.path && mode === "center") return;
+    // its own key: the tile that showed it is replaced, and the two must not
+    // be taken for one item
+    const c = { ...m, key: -m.key - 1000, skips: 0 };
+    centerMedia = c;
+    s.center = m.path;
+    queue.hold(m.path);
+    if (mode === "center" && tiled instanceof MosaicController) {
+      if (lightbox) lightbox = null;
+      tiled.setCenter(c);
+      return say("in the centre");
+    }
+    lightbox = null;
+    setMode("center");
+  }
+
   function act(a: MenuAction, m: Media) {
     if (a === "reveal") revealItemInDir(m.path).catch((e) => say(String(e)));
     else if (a === "open") (isUrl(m.path) ? openUrl(m.path) : openPath(m.path)).catch((e) => say(String(e)));
+    else if (a === "center") center(m);
     else drop(m, a === "hide");
   }
 
   function contextmenu(e: MouseEvent) {
     e.preventDefault();
-    const target = lightbox ?? hover;
+    const target = lightbox?.media ?? hover;
     menu = target ? { media: target, x: e.clientX, y: e.clientY } : null;
     poke();
+  }
+
+  /** F, double-click: the item whole. A video carries on from where its tile was. */
+  function open(m: Media) {
+    const el = document.querySelector<HTMLVideoElement>(`video[data-key="${m.key}"]`);
+    lightbox = { media: m, time: el && Number.isFinite(el.currentTime) ? el.currentTime : 0 };
+  }
+
+  function applyOnTop() {
+    win.setAlwaysOnTop(s.alwaysOnTop).catch((e) => console.warn("always on top:", e));
   }
 
   const DISPLAY_NAME = /^\\\\\.\\/;
@@ -178,35 +243,68 @@
     }
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     poke();
+    const lower = k.toLowerCase();
+    if (k === "Escape" && menu) {
+      menu = null;
+      return;
+    }
+    // one item is open: its keys first (zoom, seek, Space plays or pauses
+    // it); of the wall's keys only those about that item or about the app
+    if (lightbox) {
+      if (viewer?.key(e)) return;
+      if (!VIEWER_PASS.has(lower)) return;
+    }
     if (k === "Escape") {
-      if (menu) menu = null;
-      else if (lightbox) lightbox = null;
-      else if (help) help = false;
+      if (help) help = false;
       else onexit();
       return;
     }
     if (k === " ") {
       e.preventDefault();
       paused = !paused;
-      link?.pause(paused);
+      // with Shift, every wall follows this one
+      if (e.shiftKey && link) {
+        link.pause(paused);
+        say(paused ? "all walls paused" : "all walls playing");
+      }
       return;
     }
     if (k === "1") return setMode("mosaic");
     if (k === "2") return setMode("ribbon");
     if (k === "3") return setMode("cascade");
     if (k === "4") return setMode("dynamic");
+    if (k === "5") return setMode("grid");
+    if (k === "6") {
+      if (!centerMedia && hover) return center(hover);
+      return setMode("center");
+    }
     if (k === "+" || k === "=") return changeCount(1);
     if (k === "-" || k === "_") return changeCount(-1);
     if (k === "ArrowUp" || k === "ArrowDown") {
       e.preventDefault();
+      const up = k === "ArrowUp";
       if (mode === "dynamic") {
         // up = faster = less time between changes
-        const step = k === "ArrowUp" ? -0.5 : 0.5;
-        s.dynamicSeconds = Math.max(1.5, Math.min(15, s.dynamicSeconds + step));
+        s.dynamicSeconds = Math.max(1.5, Math.min(15, s.dynamicSeconds + (up ? -0.5 : 0.5)));
         return say(`a change every ${s.dynamicSeconds} s`);
       }
+      if (mode === "grid") {
+        const [lo, hi] = LIMITS.gridRows;
+        const n = Math.max(lo, Math.min(hi, s.gridRows + (up ? 1 : -1)));
+        if (n === s.gridRows) return;
+        s.gridRows = n;
+        regrid();
+        return say(`grid ${s.gridCols}×${s.gridRows}`);
+      }
+      if (mode === "center") {
+        const size = Math.round(Math.max(0.3, Math.min(1, s.centerSize + (up ? 0.05 : -0.05))) * 100) / 100;
+        if (size === s.centerSize) return;
+        s.centerSize = size;
+        tiled?.retile();
+        return say(`centre ${Math.round(size * 100)}%`);
+      }
       if (!isFeed(mode)) return;
-      s.speed = Math.round(Math.max(10, Math.min(1200, s.speed * (k === "ArrowUp" ? 1.2 : 1 / 1.2))));
+      s.speed = Math.round(Math.max(10, Math.min(1200, s.speed * (up ? 1.2 : 1 / 1.2))));
       return say(`${s.speed} px/s`);
     }
     // [ ] by 5%, { } (with Shift) by 25%
@@ -215,7 +313,6 @@
       s.rate = Math.max(0.25, Math.min(3, Math.round((s.rate + step) * 100) / 100));
       return say(`playback ${s.rate.toFixed(2)}×`);
     }
-    const lower = k.toLowerCase();
     if (lower === "d" && isFeed(mode)) {
       if (mode === "ribbon") s.ribbonDir = s.ribbonDir === "left" ? "right" : "left";
       else s.cascadeDir = s.cascadeDir === "up" ? "down" : "up";
@@ -223,9 +320,9 @@
       return say(`moving ${mode === "ribbon" ? s.ribbonDir : s.cascadeDir}`);
     }
     if (lower === "r") {
-      if (mosaic) {
-        mosaic.retile();
-        return say("retile");
+      if (tiled) {
+        tiled.retile();
+        return say(mode === "grid" ? "new items" : "retile");
       }
       build();
       return say("refill");
@@ -234,37 +331,45 @@
       debug = !debug;
       return say(debug ? "showing changes" : "hiding changes");
     }
+    if (lower === "t") {
+      s.alwaysOnTop = !s.alwaysOnTop;
+      applyOnTop();
+      link?.onTop(s.alwaysOnTop);
+      return say(s.alwaysOnTop ? "on top of other windows" : "not kept on top");
+    }
     if (k === "?" || lower === "h") {
       help = !help;
       return;
     }
     if (lower === "n") {
-      if (mosaic?.hovered != null) mosaic.next(mosaic.hovered);
-      else if (!mosaic) say("N works in Mosaic and Dynamic");
+      if (tiled?.hovered != null) tiled.next(tiled.hovered);
+      else if (!tiled) say("N works in Mosaic, Dynamic, Grid and Centre");
       return;
     }
     if (lower === "p") {
-      if (mosaic?.hovered != null) {
-        const id = mosaic.hovered;
-        mosaic.togglePin(id);
-        return say(mosaic.tiles.find((t) => t.id === id)?.pinned ? "pinned" : "unpinned");
+      if (tiled?.hovered != null) {
+        const id = tiled.hovered;
+        tiled.togglePin(id);
+        const t = tiled.tiles.find((t) => t.id === id);
+        if (!t?.fixed) say(t?.pinned ? "pinned" : "unpinned");
       }
       return;
     }
-    const target = lightbox ?? hover;
-    if (lower === "m" && target) {
-      audioKey = audioKey === target.key ? null : target.key;
-      if (audioKey !== null) link?.sound();
-      return say(audioKey === null ? "sound off" : "sound on");
-    }
-    if (lower === "f" && target) {
-      lightbox = lightbox ? null : target;
-      return;
-    }
+    const target = lightbox?.media ?? hover;
+    if (lower === "c" && target) return center(target);
+    if (lower === "m" && target) return sound(target);
+    if (lower === "f" && target) return open(target);
     if (lower === "o" && target && !isUrl(target.path)) {
       revealItemInDir(target.path).catch((err) => say(String(err)));
       return;
     }
+  }
+
+  /** M: sound on for this item, or off if it is the one that has it */
+  function sound(target: Media) {
+    audioKey = audioKey === target.key ? null : target.key;
+    if (audioKey !== null) link?.sound();
+    say(audioKey === null ? "sound off" : "sound on");
   }
 
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -274,7 +379,7 @@
       if (Math.abs(window.innerWidth - w) < 2 && Math.abs(window.innerHeight - h) < 2) return;
       w = window.innerWidth;
       h = window.innerHeight;
-      if (mosaic) mosaic.resize(bounds());
+      if (tiled) tiled.resize(bounds());
       else if (feed) build();
     }, 220);
   }
@@ -336,19 +441,41 @@
     return `${head} Fewer rows or tiles lowers the load.`;
   }
 
-  /** multi: keys go to the wall under the pointer */
+  // multi: keys go to the wall under the pointer. Rust takes focus only from
+  // another wall, never from another program: with Explorer or a terminal in
+  // front, moving the pointer over a wall must not bring the wall back up.
+  let focusAsked = 0;
   function moved() {
     poke();
-    if (multi && !focused) win.setFocus().catch(() => {});
+    if (!multi || focused) return;
+    const now = performance.now();
+    if (now - focusAsked < 250) return;
+    focusAsked = now;
+    api.focusWall().catch(() => {});
+  }
+
+  /** `s.center` as a Media: from the scan if the file is in the sources, else scanned alone */
+  async function loadCenter(): Promise<Media | null> {
+    if (!s.center) return null;
+    try {
+      const entry = library.items.find((e) => e.path === s.center) ?? (await api.scan([s.center], false)).items[0];
+      return entry ? await measureEntry(entry) : null;
+    } catch (e) {
+      console.warn("centre:", e);
+      return null;
+    }
   }
 
   onMount(() => {
     let alive = true;
     let restore: { pos: PhysicalPosition; size: PhysicalSize } | null = null;
+    // dev: window.__CW_WINDOWED__ runs the wall inside the window as it is
+    const windowed = import.meta.env.DEV && (window as any).__CW_WINDOWED__;
     (async () => {
+      const centre = mode === "center" ? loadCenter() : null;
       try {
         // a wall window was placed on its display by walls.rs
-        if (s.monitor && !multi) {
+        if (s.monitor && !multi && !windowed) {
           const target = (await availableMonitors()).find((m) => m.name === s.monitor);
           if (target) {
             restore = { pos: await win.outerPosition(), size: await win.outerSize() };
@@ -359,11 +486,19 @@
             await win.setPosition(new PhysicalPosition(target.position.x + 60, target.position.y + 60));
           }
         }
-        await win.setFullscreen(true);
+        if (!windowed) await win.setFullscreen(true);
+        if (s.alwaysOnTop) applyOnTop();
       } catch (e) {
         console.warn("fullscreen:", e);
       }
       await sleep(300);
+      if (centre) {
+        centerMedia = await centre;
+        if (!centerMedia) {
+          mode = "mosaic";
+          say(s.center ? "The centre file could not be played. Showing Mosaic." : "Centre has no file yet: hover an item and press C", 4000);
+        }
+      }
       if (!alive) return;
       w = window.innerWidth;
       h = window.innerHeight;
@@ -391,7 +526,7 @@
     const frames = setInterval(sampleFrames, 2000);
     api.gpuInfo().then((g) => (gpu = g)).catch(() => {});
     poke();
-    if (import.meta.env.DEV) (window as any).__cwWall = { mosaic: () => mosaic, feed: () => feed, queue, setMode };
+    if (import.meta.env.DEV) (window as any).__cwWall = { tiled: () => tiled, mosaic: () => tiled, feed: () => feed, queue, setMode, open, center, state: () => ({ mode, paused, wallPaused, lightbox: lightbox?.media.path ?? null, center: centerMedia?.path ?? null }) };
     return () => {
       alive = false;
       unfocus?.();
@@ -400,12 +535,14 @@
       window.removeEventListener("resize", resized);
       clearInterval(frames);
       clearTimeout(hudTimer);
-      mosaic?.destroy();
+      tiled?.destroy();
       feed?.destroy();
       queue.destroy();
       link?.destroy();
       // a wall window is closing; nothing to restore
       if (multi) return;
+      win.setAlwaysOnTop(false).catch(() => {});
+      if (windowed) return;
       win
         .setFullscreen(false)
         .then(async () => {
@@ -418,20 +555,34 @@
   });
 
   // what the wall itself plays by: Space, plus the optional automatic pauses.
-  // The open item in the lightbox follows Space only.
+  // The open item in the viewer has its own play and pause.
   const wallPaused = $derived(paused || (s.pauseBehindViewer && lightbox !== null) || (s.pauseUnfocused && !(multi ? focusedAny : focused)));
 
   const count = $derived(s[settings.countKey(mode)]);
-  const countLabel = $derived(!isFeed(mode) ? (count === 1 ? "tile" : "tiles") : mode === "ribbon" ? (count === 1 ? "row" : "rows") : count === 1 ? "column" : "columns");
+  const countLabel = $derived.by(() => {
+    if (mode === "grid") return "";
+    if (mode === "center") return "around";
+    if (mode === "ribbon") return count === 1 ? "row" : "rows";
+    if (mode === "cascade") return count === 1 ? "column" : "columns";
+    return count === 1 ? "tile" : "tiles";
+  });
   const direction = $derived(mode === "ribbon" ? (s.ribbonDir === "left" ? "← left" : "→ right") : s.cascadeDir === "up" ? "↑ up" : "↓ down");
+  /** the chip after the mode's name */
+  const detail = $derived.by(() => {
+    if (mode === "grid") return `${gridLabel(s.gridCols, s.gridRows, s.gridSpans)}${s.gridFit === "contain" ? " · whole" : ""}`;
+    if (isFeed(mode)) return `${direction} · ${Math.round(s.speed)} px/s`;
+    if (mode === "dynamic") return `every ${s.dynamicSeconds} s`;
+    if (mode === "center") return centerMedia ? `${Math.round(s.centerSize * 100)}% · ${centerMedia.name}` : "";
+    return "";
+  });
 </script>
 
 <div class="wall" class:hide-cursor={!hudVisible && !help && !menu} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
-  {#if mosaic}
-    <MosaicView ctl={mosaic} {s} paused={wallPaused} {audioKey} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={(m) => (lightbox = m)} />
+  {#if tiled}
+    <MosaicView ctl={tiled} {s} paused={wallPaused} {audioKey} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={open} />
   {:else if feed}
     {#key feedGen}
-      <FeedView ctl={feed} {s} paused={wallPaused} {audioKey} {hudVisible} onhover={(m) => (hover = m)} onopen={(m) => (lightbox = m)} />
+      <FeedView ctl={feed} {s} paused={wallPaused} {audioKey} {hudVisible} onhover={(m) => (hover = m)} onopen={open} />
     {/key}
   {/if}
 
@@ -443,38 +594,50 @@
   {/if}
 
   {#if lightbox}
-    <Lightbox
-      media={lightbox}
-      muted={audioKey !== lightbox.key}
-      volume={s.volume / 100}
-      rate={s.rate}
-      {paused}
-      onclose={() => (lightbox = null)}
-    />
+    {#key lightbox.media.key}
+      <Viewer
+        bind:this={viewer}
+        media={lightbox.media}
+        time={lightbox.time}
+        muted={audioKey !== lightbox.media.key}
+        volume={s.volume}
+        rate={s.rate}
+        chrome={hudVisible}
+        onclose={() => (lightbox = null)}
+        onsound={() => lightbox && sound(lightbox.media)}
+        onvolume={(v) => (s.volume = v)}
+      />
+    {/key}
   {/if}
 
   {#if menu}
-    <ContextMenu media={menu.media} x={menu.x} y={menu.y} onaction={(a) => menu && act(a, menu.media)} onclose={() => (menu = null)} />
+    <ContextMenu
+      media={menu.media}
+      x={menu.x}
+      y={menu.y}
+      centered={mode === "center" && centerMedia?.path === menu.media.path}
+      onaction={(a) => menu && act(a, menu.media)}
+      onclose={() => (menu = null)}
+    />
   {/if}
 
   <Hud
     visible={hudVisible}
+    bare={lightbox !== null}
     {help}
     {mode}
     {count}
     {countLabel}
+    {detail}
     {paused}
+    onTop={s.alwaysOnTop}
     rate={s.rate}
-    speed={s.speed}
-    dynamicSeconds={s.dynamicSeconds}
-    {direction}
     {hover}
-    queued={queue.readyCount}
     total={queue.total}
     unplayable={queue.unplayable}
     {dropped}
     {stall}
-    last={mosaic?.last ?? null}
+    last={tiled?.last ?? null}
     {debug}
     {toast}
     {onexit}

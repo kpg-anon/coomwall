@@ -24,6 +24,8 @@ pub struct AppState {
     hidden_path: PathBuf,
     /// resolved once at launch; the webview's browser args were built from it
     pub gpu: GpuInfo,
+    /// the `color` setting this launch started with: "direct" or "managed"
+    pub color: String,
 }
 
 impl AppState {
@@ -41,6 +43,7 @@ impl AppState {
         let saved = read_settings(&settings_path);
         let text = |key: &str, default: &str| saved.get(key).and_then(|v| v.as_str()).unwrap_or(default).to_string();
         let gpu = gpu::resolve(&text("gpu", "auto"));
+        let color = if text("color", "direct") == "managed" { "managed" } else { "direct" }.to_string();
         Ok(AppState {
             cache: Arc::new(Mutex::new(DimCache::load(&cache_path))),
             cache_path,
@@ -49,6 +52,7 @@ impl AppState {
             hidden: Mutex::new(hidden),
             hidden_path,
             gpu,
+            color,
         })
     }
 }
@@ -161,6 +165,22 @@ pub async fn plan_reflow(
     Ok(layout::reflow(&tree, bounds, leaf, aspect, &media, &params))
 }
 
+/// Centre mode: `center` in the middle of the wall, `items` around it. `prev`
+/// holds the rectangles of tiles already on screen, so a re-layout keeps
+/// them near where they are.
+#[tauri::command]
+pub async fn plan_center(
+    center: Item,
+    share: f64,
+    items: Vec<Item>,
+    bounds: Rect,
+    prev: Option<HashMap<u32, Rect>>,
+    params: Params,
+) -> Result<Option<Plan>, String> {
+    let items: Vec<(u32, f64)> = items.into_iter().map(|i| (i.id, i.aspect)).collect();
+    Ok(layout::arrange_center((center.id, center.aspect), share, &items, bounds, &prev.unwrap_or_default(), &params))
+}
+
 /// The same tree on a new screen size (window resize, other monitor).
 #[tauri::command]
 pub fn plan_layout(tree: Tree, bounds: Rect) -> Vec<Placed> {
@@ -271,7 +291,14 @@ pub fn gpu_info(state: State<'_, AppState>) -> GpuInfo {
     state.gpu.clone()
 }
 
-/// Relaunch, so a changed GPU setting reaches the webview's browser args.
+/// The colour setting this launch started with. A change needs a restart,
+/// like the GPU setting: both are browser arguments.
+#[tauri::command]
+pub fn launch_color(state: State<'_, AppState>) -> String {
+    state.color.clone()
+}
+
+/// Relaunch, so a changed GPU or colour setting reaches the webview's browser args.
 #[tauri::command]
 pub fn restart(app: AppHandle) {
     app.restart()

@@ -4,21 +4,22 @@
   // Bottom: the keys, like comfysort's bottom bar.
   import { I } from "$lib/icons";
   import type { Media } from "$lib/queue.svelte";
-  import type { Mode } from "$lib/settings.svelte";
+  import { MODE_NAMES, type Mode } from "$lib/settings.svelte";
 
   interface Props {
     visible: boolean;
+    /** one item is open in the viewer: only messages show, above it */
+    bare?: boolean;
     help: boolean;
     mode: Mode;
     count: number;
     countLabel: string;
+    /** the mode's own numbers: direction and speed, grid size, ... */
+    detail: string;
     paused: boolean;
+    onTop: boolean;
     rate: number;
-    speed: number;
-    dynamicSeconds: number;
-    direction: string;
     hover: Media | null;
-    queued: number;
     total: number;
     unplayable: number;
     dropped: string;
@@ -32,8 +33,7 @@
 
   let p: Props = $props();
 
-  const MODE_NAME: Record<Mode, string> = { mosaic: "Mosaic", ribbon: "Ribbon", cascade: "Cascade", dynamic: "Dynamic" };
-  const MODE_ICON: Record<Mode, string> = { mosaic: I.th, ribbon: I.bars, cascade: I.columns, dynamic: I.random };
+  const MODE_ICON: Record<Mode, string> = { mosaic: I.th, ribbon: I.bars, cascade: I.columns, dynamic: I.random, grid: I.thLarge, center: I.bullseye };
 
   function ext(name: string): string {
     const i = name.lastIndexOf(".");
@@ -43,73 +43,80 @@
   const KEYS: [string, string][] = [
     ["Space", "pause"],
     ["+ −", "count"],
-    ["1–4", "mode"],
+    ["1–6", "mode"],
     ["N", "next"],
     ["P", "pin"],
     ["M", "sound"],
     ["F", "view"],
+    ["C", "centre"],
     ["R", "retile"],
     ["?", "keys"],
     ["Esc", "back"],
   ];
 </script>
 
-<div class="hud" class:visible={p.visible || p.help || !!p.toast}>
-  <div class="top">
-    <button class="back" onclick={p.onexit} title="Back to setup (Esc)"><span class="nf">{I.back}</span></button>
-    <span class="brand">coomwall</span>
-    <span class="chip mode"><span class="nf">{MODE_ICON[p.mode]}</span>{MODE_NAME[p.mode]}</span>
-    <span class="chip">{p.count} {p.countLabel}</span>
-    {#if p.mode === "ribbon" || p.mode === "cascade"}<span class="chip">{p.direction} · {Math.round(p.speed)} px/s</span>{/if}
-    {#if p.mode === "dynamic"}<span class="chip">every {p.dynamicSeconds} s</span>{/if}
-    {#if p.rate !== 1}<span class="chip">{p.rate.toFixed(2)}×</span>{/if}
-    {#if p.paused}<span class="chip warn"><span class="nf">{I.pause}</span>paused</span>{/if}
+<div class="hud" class:visible={(p.visible && !p.bare) || p.help || !!p.toast} class:bare={p.bare}>
+  {#if !p.bare}
+    <div class="top">
+      <button class="back" onclick={p.onexit} title="Back to setup (Esc)"><span class="nf">{I.back}</span></button>
+      <span class="brand">coomwall</span>
+      <span class="chip mode"><span class="nf">{MODE_ICON[p.mode]}</span>{MODE_NAMES[p.mode]}</span>
+      {#if p.countLabel}<span class="chip">{p.count} {p.countLabel}</span>{/if}
+      {#if p.detail}<span class="chip detail">{p.detail}</span>{/if}
+      {#if p.rate !== 1}<span class="chip">{p.rate.toFixed(2)}×</span>{/if}
+      {#if p.onTop}<span class="chip" title="Above every other window (T)"><span class="nf">{I.layers}</span>on top</span>{/if}
+      {#if p.paused}<span class="chip warn"><span class="nf">{I.pause}</span>paused</span>{/if}
 
-    <span class="hover">
-      {#if p.hover}
-        <span class="ext ext-{ext(p.hover.name)}">{ext(p.hover.name) || p.hover.kind}</span>
-        <span class="name">{p.hover.name}</span>
-        <span class="dim">{p.hover.w}×{p.hover.h}</span>
-      {/if}
-    </span>
+      <span class="hover">
+        {#if p.hover}
+          <span class="ext ext-{ext(p.hover.name)}">{ext(p.hover.name) || p.hover.kind}</span>
+          <span class="name">{p.hover.name}</span>
+          <span class="dim">{p.hover.w}×{p.hover.h}</span>
+        {/if}
+      </span>
 
-    <span class="stats">
-      <span title="files in this wall">{p.total.toLocaleString()} files</span>
-      {#if p.unplayable}<span class="bad" title="files the player could not decode">{p.unplayable} skipped</span>{/if}
-      <span title="frames dropped by visible videos">{p.dropped}</span>
-      {#if p.debug && p.last}
-        <span class="dbg">{p.last.kind} · {p.last.moved} moved · crop {(p.last.crop * 100).toFixed(0)}% · {p.last.ms} ms</span>
-      {/if}
-    </span>
-  </div>
+      <span class="stats">
+        <span title="files in this wall">{p.total.toLocaleString()} files</span>
+        {#if p.unplayable}<span class="bad" title="files the player could not decode">{p.unplayable} skipped</span>{/if}
+        <span title="frames dropped by visible videos">{p.dropped}</span>
+        {#if p.debug && p.last}
+          <span class="dbg">{p.last.kind} · {p.last.moved} moved · crop {(p.last.crop * 100).toFixed(0)}% · {p.last.ms} ms</span>
+        {/if}
+      </span>
+    </div>
+  {/if}
 
   {#if p.toast}<div class="toast">{p.toast}</div>{/if}
-  {#if p.stall}<div class="stall"><span class="nf">{I.warn}</span>{p.stall}</div>{/if}
+  {#if p.stall && !p.bare}<div class="stall"><span class="nf">{I.warn}</span>{p.stall}</div>{/if}
 
-  <div class="bottom">
-    {#each KEYS as [k, label]}
-      <span class="key"><kbd>{k}</kbd>{label}</span>
-    {/each}
-  </div>
+  {#if !p.bare}
+    <div class="bottom">
+      {#each KEYS as [k, label]}
+        <span class="key"><kbd>{k}</kbd>{label}</span>
+      {/each}
+    </div>
+  {/if}
 
   {#if p.help}
     <div class="help">
       <h2><span class="nf">{I.keyboard}</span> Keys</h2>
       <dl>
-        <dt><kbd>Space</kbd></dt><dd>pause or resume everything</dd>
-        <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></dt><dd>Mosaic · Ribbon · Cascade · Dynamic, without leaving the wall</dd>
+        <dt><kbd>Space</kbd></dt><dd>pause or resume this wall · with <kbd>Shift</kbd>, every wall</dd>
+        <dt><kbd>1</kbd>–<kbd>6</kbd></dt><dd>Mosaic · Ribbon · Cascade · Dynamic · Grid · Centre, without leaving the wall</dd>
         <dt><kbd>+</kbd> <kbd>−</kbd></dt><dd>one more or one fewer tile, row or column</dd>
-        <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>feed speed · Dynamic: changes more or less often</dd>
+        <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>feed speed · Dynamic: how often · Grid: rows · Centre: its size</dd>
         <dt><kbd>D</kbd></dt><dd>reverse the feed's direction</dd>
         <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>playback speed by 5% · with <kbd>Shift</kbd>, by 25%</dd>
         <dt><kbd>N</kbd></dt><dd>next item in the tile under the pointer</dd>
         <dt><kbd>P</kbd></dt><dd>pin it: it keeps playing and nothing moves it</dd>
         <dt><kbd>M</kbd></dt><dd>sound on for the item under the pointer</dd>
-        <dt><kbd>F</kbd> / double-click</dt><dd>view it whole</dd>
+        <dt><kbd>F</kbd> / double-click</dt><dd>view it whole: wheel to zoom, drag to pan</dd>
+        <dt><kbd>C</kbd></dt><dd>play it in the centre, with the other tiles around it</dd>
         <dt><kbd>O</kbd></dt><dd>show the file in Explorer</dd>
-        <dt>right-click</dt><dd>show in Explorer, open in the default app, remove from the wall, never show again</dd>
+        <dt>right-click</dt><dd>show in Explorer, open in the default app, play in the centre, remove from the wall, never show again</dd>
+        <dt><kbd>T</kbd></dt><dd>keep the walls above every other window, or stop</dd>
         <dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></dt><dd>move this wall to the display on that side; a wall there swaps with it</dd>
-        <dt><kbd>R</kbd></dt><dd>Mosaic, Dynamic: lay the whole wall out again · feeds: refill</dd>
+        <dt><kbd>R</kbd></dt><dd>lay the wall out again · Grid: new items · feeds: refill</dd>
         <dt><kbd>G</kbd></dt><dd>show where each change happens</dd>
         <dt><kbd>Esc</kbd></dt><dd>back to setup</dd>
       </dl>
@@ -129,6 +136,10 @@
   }
   .hud.visible {
     opacity: 1;
+  }
+  /* above the viewer (z-index 30) */
+  .hud.bare {
+    z-index: 40;
   }
   .top,
   .bottom {
@@ -197,6 +208,12 @@
   }
   .chip.warn {
     color: var(--yellow);
+  }
+  .chip.detail {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
   }
   .hover {
     flex: 1;
@@ -289,7 +306,7 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 520px;
+    width: 600px;
     padding: 20px 24px;
     border-radius: 12px;
     background: color-mix(in srgb, var(--bg-panel) 96%, transparent);

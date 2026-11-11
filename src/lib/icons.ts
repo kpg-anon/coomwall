@@ -35,4 +35,10 @@ export const I = {
   external: "",
   ban: "",
   eyeSlash: "",
+  thLarge: "\uf009",
+  bullseye: "\uf140",
+  rotate: "\uf01e",
+  flip: "\uf0ec",
+  compress: "\uf066",
+  layers: "\uf24d",
 } as const;

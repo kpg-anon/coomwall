@@ -7,17 +7,19 @@
   import type { Media } from "$lib/queue.svelte";
   import { I } from "$lib/icons";
 
-  export type MenuAction = "reveal" | "open" | "remove" | "hide";
+  export type MenuAction = "reveal" | "open" | "center" | "remove" | "hide";
 
   interface Props {
     media: Media;
     x: number;
     y: number;
+    /** this item is Centre mode's middle item already */
+    centered?: boolean;
     onaction: (a: MenuAction) => void;
     onclose: () => void;
   }
 
-  let { media, x, y, onaction, onclose }: Props = $props();
+  let { media, x, y, centered = false, onaction, onclose }: Props = $props();
 
   let el = $state<HTMLDivElement>();
   let w = $state(0);
@@ -65,6 +67,9 @@
   </button>
   <button role="menuitem" onclick={() => pick("open")}>
     <span class="nf">{I.external}</span>Open in default app
+  </button>
+  <button role="menuitem" disabled={centered} onclick={() => pick("center")}>
+    <span class="nf">{I.bullseye}</span>Play in the centre<kbd>C</kbd>
   </button>
   <hr />
   <button role="menuitem" onclick={() => pick("remove")}>

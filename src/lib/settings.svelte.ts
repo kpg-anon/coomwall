@@ -3,11 +3,21 @@
 // a setting never breaks an existing install.
 import { api } from "./api";
 
-export type Mode = "mosaic" | "ribbon" | "cascade" | "dynamic";
+export type Mode = "mosaic" | "ribbon" | "cascade" | "dynamic" | "grid" | "center";
 export type TypeFilter = "mixed" | "videos" | "images";
 export type ShapeFilter = "any" | "portrait" | "landscape";
 /** auto: Windows decides (the power-saving GPU for WebView2) */
 export type GpuChoice = "auto" | "high" | "low";
+/** direct: colour values go to the display as they are in the file, as mpv
+ * and most viewers do. managed: converted to the display's colour profile. */
+export type ColorChoice = "direct" | "managed";
+/** Grid: cells merged into one tile, in cell units from the top left */
+export interface GridSpan {
+  c: number;
+  r: number;
+  w: number;
+  h: number;
+}
 
 export interface Settings {
   sources: string[];
@@ -17,6 +27,22 @@ export interface Settings {
   tiles: number;
   /** Dynamic: seconds between new items (each one re-lays out the wall) */
   dynamicSeconds: number;
+  /** Dynamic: how much larger the newest items are than the rest. 0 = all
+   * tiles alike, 1 = the newest is about 4.5 times an old one. */
+  dynamicFocus: number;
+  /** Grid: columns and rows of equal cells */
+  gridCols: number;
+  gridRows: number;
+  /** Grid: cells merged into larger tiles */
+  gridSpans: GridSpan[];
+  /** Grid: fill each cell (cropping what does not fit) or show items whole */
+  gridFit: "cover" | "contain";
+  /** Centre: the file that plays in the middle; "" until one is chosen */
+  center: string;
+  /** Centre: its size, as a share of the largest size that fits the wall */
+  centerSize: number;
+  /** Centre: tiles around it */
+  centerTiles: number;
   /** Ribbon: rows */
   rows: number;
   /** Cascade: columns */
@@ -63,6 +89,10 @@ export interface Settings {
   monitor: string;
   /** read by Rust at launch (src-tauri/src/gpu.rs); a change needs a restart */
   gpu: GpuChoice;
+  /** read by Rust at launch (src-tauri/src/lib.rs); a change needs a restart */
+  color: ColorChoice;
+  /** the wall stays above every other window */
+  alwaysOnTop: boolean;
   theme: string;
   /** a wall on each display that is on in `walls`, instead of one wall */
   multiWall: boolean;
@@ -71,12 +101,35 @@ export interface Settings {
 }
 
 /** What each display's wall chooses for itself; everything else is shared. */
-export const LAYOUT_KEYS = ["mode", "tiles", "rows", "columns", "ribbonDir", "cascadeDir", "speed", "stillness", "dynamicSeconds", "type", "shape"] as const;
+export const LAYOUT_KEYS = [
+  "mode",
+  "tiles",
+  "rows",
+  "columns",
+  "ribbonDir",
+  "cascadeDir",
+  "speed",
+  "stillness",
+  "dynamicSeconds",
+  "dynamicFocus",
+  "gridCols",
+  "gridRows",
+  "gridSpans",
+  "gridFit",
+  "center",
+  "centerSize",
+  "centerTiles",
+  "type",
+  "shape",
+] as const;
 export type Layout = Pick<Settings, (typeof LAYOUT_KEYS)[number]>;
-export type WallLayout = Layout & { on: boolean };
+/** `sources`: this display's own folders and playlists. Missing or empty,
+ * the display plays the shared sources. */
+export type WallLayout = Layout & { on: boolean; sources?: string[] };
 
+/** A copy of the layout keys of `from` (arrays copied, not shared). */
 export function layoutOf(from: Layout): Layout {
-  return Object.fromEntries(LAYOUT_KEYS.map((k) => [k, from[k]])) as unknown as Layout;
+  return Object.fromEntries(LAYOUT_KEYS.map((k) => [k, Array.isArray(from[k]) ? JSON.parse(JSON.stringify(from[k])) : from[k]])) as unknown as Layout;
 }
 
 export const DEFAULTS: Settings = {
@@ -85,6 +138,14 @@ export const DEFAULTS: Settings = {
   mode: "mosaic",
   tiles: 7,
   dynamicSeconds: 3,
+  dynamicFocus: 0.6,
+  gridCols: 3,
+  gridRows: 1,
+  gridSpans: [],
+  gridFit: "cover",
+  center: "",
+  centerSize: 0.7,
+  centerTiles: 8,
   rows: 2,
   columns: 4,
   ribbonDir: "left",
@@ -110,6 +171,8 @@ export const DEFAULTS: Settings = {
   audioFollowsMouse: false,
   monitor: "",
   gpu: "auto",
+  color: "direct",
+  alwaysOnTop: false,
   theme: "comfy-dark",
   multiWall: false,
   walls: {},
@@ -119,10 +182,24 @@ export const LIMITS = {
   tiles: [1, 16],
   rows: [1, 6],
   columns: [1, 10],
+  gridCols: [1, 8],
+  gridRows: [1, 6],
+  centerTiles: [2, 16],
 } as const;
 
+export type CountKey = keyof typeof LIMITS;
+
+export const MODE_NAMES: Record<Mode, string> = {
+  mosaic: "Mosaic",
+  ribbon: "Ribbon",
+  cascade: "Cascade",
+  dynamic: "Dynamic",
+  grid: "Grid",
+  center: "Centre",
+};
+
 class SettingsStore {
-  s = $state<Settings>({ ...DEFAULTS, walls: {} });
+  s = $state<Settings>({ ...DEFAULTS, gridSpans: [], walls: {} });
   loaded = $state(false);
   /** in a wall window: the display it fills. Its layout is saved under walls[wall]. */
   private wall: string | null = null;
@@ -133,7 +210,7 @@ class SettingsStore {
       const v = await api.getSettings();
       // assign into the existing object: components hold `settings.s` from
       // before the load finished, and must keep seeing the live one
-      if (v && typeof v === "object") Object.assign(this.s, { ...DEFAULTS, walls: {}, ...(v as Partial<Settings>) });
+      if (v && typeof v === "object") Object.assign(this.s, { ...DEFAULTS, gridSpans: [], walls: {}, ...(v as Partial<Settings>) });
     } catch (e) {
       console.warn("settings: could not load", e);
     }
@@ -145,8 +222,12 @@ class SettingsStore {
   useWall(monitor: string) {
     this.wall = monitor;
     const l = this.s.walls[monitor];
+    if (!l) return;
     // entries saved before a key existed lack it; those keep the shared value
-    if (l) for (const k of LAYOUT_KEYS) if (l[k] !== undefined) (this.s as any)[k] = l[k];
+    for (const k of LAYOUT_KEYS) if (l[k] !== undefined) (this.s as any)[k] = l[k];
+    // this display's own folders, if it has any. Not saved back from here:
+    // a wall window writes only its layout (see write)
+    if (l.sources?.length) this.s.sources = [...l.sources];
   }
 
   /** The wall moved to another display (walls.rs swapped the saved layouts). */
@@ -176,15 +257,20 @@ class SettingsStore {
 
   private write(): Promise<void> {
     if (!this.wall) return api.setSettings($state.snapshot(this.s));
-    // a wall changes its own layout (1-4, + -, arrows, D) and the playback
-    // rate ([ ]); other walls and setup keep everything else
+    // a wall changes its own layout (1-6, + -, arrows, D, C), the playback
+    // rate ([ ]) and whether walls stay on top (T); other walls and setup
+    // keep everything else
     const s = $state.snapshot(this.s);
-    return api.patchSettings({ rate: s.rate, walls: { [this.wall]: { ...layoutOf(s), on: true } } });
+    return api.patchSettings({ rate: s.rate, alwaysOnTop: s.alwaysOnTop, walls: { [this.wall]: { ...layoutOf(s), on: true } } });
   }
 
   /** the count control for the current mode */
-  countKey(mode: Mode = this.s.mode): "tiles" | "rows" | "columns" {
-    return mode === "mosaic" || mode === "dynamic" ? "tiles" : mode === "ribbon" ? "rows" : "columns";
+  countKey(mode: Mode = this.s.mode): CountKey {
+    if (mode === "ribbon") return "rows";
+    if (mode === "cascade") return "columns";
+    if (mode === "grid") return "gridCols";
+    if (mode === "center") return "centerTiles";
+    return "tiles";
   }
 }
 

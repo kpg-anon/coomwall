@@ -113,11 +113,12 @@
 </script>
 
 {#if media.kind === "image"}
-  <img src={media.url} alt="" draggable="false" decoding="async" style:object-fit={fit} onload={ready} onerror={failed} />
+  <img src={media.url} alt="" draggable="false" decoding="async" data-key={media.key} style:object-fit={fit} onload={ready} onerror={failed} />
 {:else}
   <video
     bind:this={video}
     src={media.url}
+    data-key={media.key}
     muted
     autoplay={!paused}
     playsinline

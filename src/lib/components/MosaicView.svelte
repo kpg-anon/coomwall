@@ -1,11 +1,11 @@
 <script lang="ts">
   import Tile from "./Tile.svelte";
-  import type { MosaicController, TileState } from "$lib/mosaic.svelte";
+  import type { TileState, TileWall } from "$lib/mosaic.svelte";
   import type { Media } from "$lib/queue.svelte";
   import type { Settings } from "$lib/settings.svelte";
 
   interface Props {
-    ctl: MosaicController;
+    ctl: TileWall;
     s: Settings;
     paused: boolean;
     audioKey: number | null;
@@ -55,6 +55,7 @@
       ring={hudVisible && ctl.hovered === tile.id}
       watched={s.hoverHold && ctl.hovered === tile.id}
       endless={ctl.dynamic}
+      fit={ctl.fit ?? "cover"}
       ondone={(id) => ctl.done(id)}
       onenter={enter}
       onleave={leave}

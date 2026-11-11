@@ -83,6 +83,8 @@ export interface Params {
   inPlaceOnly: boolean;
   allowGlobal: boolean;
   skipCost: number;
+  /** tile id -> target relative area; tiles not listed weigh 1 */
+  weights?: Record<number, number>;
 }
 
 /** tile id -> aspect ratio of what it is showing */
@@ -114,6 +116,9 @@ export const api = {
     invoke<Plan | null>("plan_retile", a),
   planReflow: (a: { tree: Tree; bounds: Rect; leaf: number; aspect: number; media: MediaMap; params: Params }) =>
     invoke<Plan | null>("plan_reflow", a),
+  /** Centre mode: `center` in the middle, `items` around it; `prev` = where tiles are now */
+  planCenter: (a: { center: { id: number; aspect: number }; share: number; items: { id: number; aspect: number }[]; bounds: Rect; prev: Record<number, Rect> | null; params: Params }) =>
+    invoke<Plan | null>("plan_center", a),
   planLayout: (tree: Tree, bounds: Rect) => invoke<Placed[]>("plan_layout", { tree, bounds }),
 
   getSettings: () => invoke<unknown>("get_settings"),
@@ -125,11 +130,15 @@ export const api = {
   closeWalls: () => invoke<void>("close_walls"),
   /** move the calling window's wall to the display on that side (swapping with a wall there) */
   moveWall: (dir: "left" | "right" | "up" | "down") => invoke<{ label: string; monitor: string }[]>("move_wall", { dir }),
+  /** focus the calling wall, but only when another window of this app has focus */
+  focusWall: () => invoke<boolean>("focus_wall"),
 
   getHidden: () => invoke<string[]>("get_hidden"),
   /** "never show again"; returns how many are hidden */
   hideItem: (path: string) => invoke<number>("hide_item", { path }),
   unhideItems: (paths: string[]) => invoke<number>("unhide_items", { paths }),
   gpuInfo: () => invoke<GpuInfo>("gpu_info"),
+  /** the colour setting this launch started with */
+  launchColor: () => invoke<"direct" | "managed">("launch_color"),
   restart: () => invoke<void>("restart"),
 };

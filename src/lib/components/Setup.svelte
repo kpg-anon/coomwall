@@ -2,18 +2,20 @@
   // The one screen before the wall: sources, a mode, and the one or two
   // numbers that mode needs. Everything else sits under "More options".
   // With a wall on each display, the mode section edits the display picked
-  // on the small map of displays.
+  // on the small map of displays, and a display can have its own folders.
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { availableMonitors, currentMonitor, type Monitor } from "@tauri-apps/api/window";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
-  import { settings, LIMITS, layoutOf, type Layout, type Mode, type WallLayout } from "$lib/settings.svelte";
+  import { settings, LIMITS, MODE_NAMES, layoutOf, type Layout, type Mode, type WallLayout } from "$lib/settings.svelte";
+  import { gridLabel } from "$lib/grid";
   import { library } from "$lib/library.svelte";
   import { api, isUrl, type Adapter, type GpuInfo } from "$lib/api";
   import { I } from "$lib/icons";
   import { THEMES } from "$lib/themes";
   import Range from "./Range.svelte";
   import Segmented from "./Segmented.svelte";
+  import GridBuilder from "./GridBuilder.svelte";
 
   let { onstart }: { onstart: () => void } = $props();
 
@@ -27,13 +29,22 @@
   let sel = $state("");
   let wallError = $state("");
   let showHidden = $state(false);
+  /** the colour setting this launch started with; null until Rust answers */
+  let launchColor = $state<string | null>(null);
+  /** multi: displays whose own-folders editor is open while their list is still empty */
+  let ownOpen = $state<Record<string, boolean>>({});
+  /** multi: what a display's own folders hold */
+  let wallScan = $state<Record<string, { images: number; videos: number; scanning: boolean }>>({});
 
-  const MODES: { id: Mode; name: string; icon: string; line: string; key: string }[] = [
-    { id: "mosaic", name: "Mosaic", icon: I.th, line: "Fills the screen. Changes one block at a time, never the one you watch.", key: "1" },
-    { id: "ribbon", name: "Ribbon", icon: I.bars, line: "Rows that glide sideways, every item at its own shape.", key: "2" },
-    { id: "cascade", name: "Cascade", icon: I.columns, line: "Columns that drift up or down, like a slow feed.", key: "3" },
-    { id: "dynamic", name: "Dynamic", icon: I.random, line: "New media every few seconds, and the whole grid rearranges around it.", key: "4" },
+  const MODES: { id: Mode; icon: string; line: string; key: string }[] = [
+    { id: "mosaic", icon: I.th, line: "Fills the screen with tiles of about one size. Changes one block at a time, never the one you watch.", key: "1" },
+    { id: "ribbon", icon: I.bars, line: "Rows that glide sideways, every item at its own shape.", key: "2" },
+    { id: "cascade", icon: I.columns, line: "Columns that drift up or down, like a slow feed.", key: "3" },
+    { id: "dynamic", icon: I.random, line: "Every few seconds a new item takes the largest tile; the others shrink and rearrange around it.", key: "4" },
+    { id: "grid", icon: I.thLarge, line: "Equal cells that never move: 3×1, 2×2, or a layout you merge yourself.", key: "5" },
+    { id: "center", icon: I.bullseye, line: "One video in the middle at its own shape, the rest arranged around it.", key: "6" },
   ];
+  const MEDIA_EXTS = ["mp4", "m4v", "webm", "mov", "mkv", "ogv", "jpg", "jpeg", "jfif", "png", "webp", "gif", "avif", "bmp"];
 
   function leaf(p: string): string {
     if (isUrl(p)) return p.replace(/^https?:\/\//, "");
@@ -51,18 +62,56 @@
     return /\.m3u8?$/i.test(p) ? I.list : I.folder;
   }
 
-  async function addFolder() {
-    const r = await open({ directory: true, multiple: true, title: "Add folders to the wall" });
-    if (r) library.add(Array.isArray(r) ? r : [r]);
+  /** `own`: into the selected display's own list instead of the shared one */
+  async function addFolder(own = false) {
+    const r = await open({ directory: true, multiple: true, title: own ? "Add folders for this display" : "Add folders to the wall" });
+    if (r) addSources(Array.isArray(r) ? r : [r], own);
   }
 
-  async function addPlaylist() {
+  async function addPlaylist(own = false) {
     const r = await open({
       multiple: true,
       title: "Add playlists",
       filters: [{ name: "Playlists", extensions: ["m3u", "m3u8"] }],
     });
-    if (r) library.add(Array.isArray(r) ? r : [r]);
+    if (r) addSources(Array.isArray(r) ? r : [r], own);
+  }
+
+  function addSources(paths: string[], own: boolean) {
+    const wall = own ? s.walls[sel] : null;
+    if (!wall) return library.add(paths);
+    const have = new Set((wall.sources ?? []).map((p) => p.toLowerCase()));
+    wall.sources = [...(wall.sources ?? []), ...paths.filter((p) => p && !have.has(p.toLowerCase()))];
+    scanWall(sel);
+  }
+
+  function removeOwn(path: string) {
+    const wall = s.walls[sel];
+    if (!wall) return;
+    wall.sources = (wall.sources ?? []).filter((p) => p !== path);
+    scanWall(sel);
+  }
+
+  /** count what a display's own folders hold, for the summary beside them */
+  async function scanWall(name: string) {
+    const sources = [...(s.walls[name]?.sources ?? [])];
+    if (!sources.length) {
+      delete wallScan[name];
+      return;
+    }
+    wallScan[name] = { images: wallScan[name]?.images ?? 0, videos: wallScan[name]?.videos ?? 0, scanning: true };
+    try {
+      const r = await api.scan(sources, s.recursive);
+      // unless the list changed while this ran
+      if (JSON.stringify(sources) === JSON.stringify(s.walls[name]?.sources ?? [])) wallScan[name] = { images: r.images, videos: r.videos, scanning: false };
+    } catch {
+      wallScan[name] = { images: 0, videos: 0, scanning: false };
+    }
+  }
+
+  async function chooseCenter() {
+    const r = await open({ multiple: false, title: "The file that plays in the centre", filters: [{ name: "Videos and images", extensions: MEDIA_EXTS }] });
+    if (typeof r === "string") L.center = r;
   }
 
   function monitorLabel(m: Monitor, i: number): string {
@@ -78,17 +127,34 @@
   function ensureWalls() {
     for (const m of monitors) {
       const w = s.walls[m.name];
-      if (!w) s.walls[m.name] = { ...layoutOf(s), on: true };
+      if (!w) s.walls[m.name] = { ...layoutOf($state.snapshot(s) as Layout), on: true };
       // entries saved before a setting became per display (Show, Shape) lack it
-      else for (const [k, v] of Object.entries(layoutOf(s))) if ((w as any)[k] === undefined) (w as any)[k] = v;
+      else for (const [k, v] of Object.entries(layoutOf($state.snapshot(s) as Layout))) if ((w as any)[k] === undefined) (w as any)[k] = v;
+      if (s.walls[m.name].sources?.length && !wallScan[m.name]) scanWall(m.name);
     }
   }
 
   function wallSummary(w: WallLayout | undefined): string {
     if (!w?.on) return "off";
-    const name = MODES.find((m) => m.id === w.mode)?.name ?? w.mode;
+    const name = MODE_NAMES[w.mode] ?? w.mode;
+    const own = w.sources?.length ? " · own folders" : "";
+    if (w.mode === "grid") return `${name} · ${gridLabel(w.gridCols, w.gridRows, w.gridSpans ?? [])}${own}`;
+    if (w.mode === "center") return `${name} · ${w.centerTiles} around${own}`;
     const key = settings.countKey(w.mode);
-    return `${name} · ${w[key]} ${key}`;
+    return `${name} · ${w[key]} ${key}${own}`;
+  }
+
+  /** what a type filter would play out of these counts */
+  function playableOf(type: string, images: number, videos: number): number {
+    return type === "images" ? images : type === "videos" ? videos : images + videos;
+  }
+
+  /** multi: files this display's wall would play, from its own folders or the shared ones */
+  function wallPlayable(name: string): number {
+    const w = s.walls[name];
+    if (!w) return 0;
+    const own = w.sources?.length ? wallScan[name] : null;
+    return own ? playableOf(w.type, own.images, own.videos) : w.sources?.length ? 0 : playableOf(w.type, library.images, library.videos);
   }
 
   // the displays drawn where Windows has them, scaled into a small box
@@ -128,6 +194,7 @@
     return null;
   });
   const stale = $derived(!!gpu && (wanted?.luid ?? null) !== (gpu.chosen?.luid ?? null));
+  const staleColor = $derived(launchColor !== null && launchColor !== s.color);
   let restarting = $state(false);
 
   function restart() {
@@ -137,8 +204,15 @@
   }
 
   const playable = $derived(library.playable());
-  const canStart = $derived(playable > 0 && !library.scanning && (!multi || wallsOn.length > 0));
-  const countKey = $derived(settings.countKey(L.mode));
+  const scanningAny = $derived(library.scanning || (multi && wallsOn.some((m) => wallScan[m.name]?.scanning)));
+  const canStart = $derived(!scanningAny && (multi ? wallsOn.some((m) => wallPlayable(m.name) > 0) : playable > 0));
+  /** some list has something in it: the shared one, or a display's own */
+  const anySources = $derived(s.sources.length > 0 || (multi && wallsOn.some((m) => s.walls[m.name]?.sources?.length)));
+  const selWall = $derived(multi ? s.walls[sel] : undefined);
+  const selOwn = $derived(!!selWall && ((selWall.sources?.length ?? 0) > 0 || !!ownOpen[sel]));
+  const selMonitor = $derived(monitors.find((m) => m.name === (multi ? sel : s.monitor)) ?? monitors.find((m) => m.name === sel));
+  /** the shape the selected wall will have, for the grid drawing */
+  const selAspect = $derived(selMonitor ? selMonitor.size.width / selMonitor.size.height : 16 / 10);
 
   async function start() {
     if (!canStart) return;
@@ -164,6 +238,8 @@
     else if (e.key === "2") L.mode = "ribbon";
     else if (e.key === "3") L.mode = "cascade";
     else if (e.key === "4") L.mode = "dynamic";
+    else if (e.key === "5") L.mode = "grid";
+    else if (e.key === "6") L.mode = "center";
   }
 
   onMount(() => {
@@ -175,6 +251,7 @@
       })
       .catch(() => {});
     api.gpuInfo().then((g) => (gpu = g)).catch(() => {});
+    api.launchColor().then((c) => (launchColor = c)).catch(() => {});
     let unlisten: (() => void) | undefined;
     getCurrentWebview()
       .onDragDropEvent((event) => {
@@ -183,7 +260,8 @@
         else if (p.type === "leave") dragging = false;
         else if (p.type === "drop") {
           dragging = false;
-          library.add(p.paths);
+          // onto the selected display's own list while that is open, else the shared one
+          addSources(p.paths, selOwn);
         }
       })
       .then((f) => (unlisten = f))
@@ -207,6 +285,10 @@
       <i class="m1"></i><i class="m2"></i><i class="m3"></i><i class="m4"></i><i class="m5"></i>
     {:else if mode === "dynamic"}
       <i class="d1"></i><i class="d2"></i><i class="d3"></i><i class="d4"></i><i class="d5"></i>
+    {:else if mode === "grid"}
+      <i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i>
+    {:else if mode === "center"}
+      <i class="c0"></i><i class="c1"></i><i class="c2"></i><i class="c3"></i><i class="c4"></i><i class="c5"></i><i class="c6"></i>
     {:else if mode === "ribbon"}
       {#each [0, 1] as row}
         <div class="row r{row}">
@@ -252,7 +334,7 @@
       </div>
 
       {#if !s.sources.length}
-        <button class="drop" class:dragging onclick={addFolder}>
+        <button class="drop" class:dragging onclick={() => addFolder()}>
           <span class="nf big">{I.folderOpen}</span>
           <span class="drop-main">Drop folders or <code>.m3u</code> playlists here</span>
           <span class="drop-sub">or click to choose a folder</span>
@@ -267,13 +349,20 @@
               <button class="x nf" title="Remove" onclick={() => library.remove(src)}>{I.close}</button>
             </span>
           {/each}
-          <button class="add" onclick={addFolder}><span class="nf">{I.plus}</span> Folder</button>
-          <button class="add" onclick={addPlaylist}><span class="nf">{I.plus}</span> Playlist</button>
+          <button class="add" onclick={() => addFolder()}><span class="nf">{I.plus}</span> Folder</button>
+          <button class="add" onclick={() => addPlaylist()}><span class="nf">{I.plus}</span> Playlist</button>
         </div>
       {/if}
 
       <label class="check">
-        <input type="checkbox" bind:checked={s.recursive} onchange={() => library.rescan()} />
+        <input
+          type="checkbox"
+          bind:checked={s.recursive}
+          onchange={() => {
+            library.rescan();
+            for (const name of Object.keys(wallScan)) scanWall(name);
+          }}
+        />
         <span>Include subfolders</span>
       </label>
       {#if library.hidden.length}
@@ -333,6 +422,7 @@
               >
                 <span class="sc-num">{b.i + 1}</span>
                 {#if s.walls[b.m.name]?.on}<span class="nf sc-icon">{MODES.find((m) => m.id === s.walls[b.m.name].mode)?.icon}</span>{/if}
+                {#if s.walls[b.m.name]?.on && s.walls[b.m.name].sources?.length}<span class="nf sc-own" title="Its own folders">{I.folder}</span>{/if}
               </button>
             {/each}
           </div>
@@ -340,7 +430,43 @@
             <div class="sel-info">
               <span class="sel-name">{monitorLabel(monitors[selIndex], selIndex)}</span>
               <label class="check"><input type="checkbox" bind:checked={s.walls[sel].on} /><span>Wall on this display</span></label>
-              <span class="sel-hint">Pick a display on the map, then its mode and what it shows below. Sources and More options are shared.</span>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  checked={selOwn}
+                  onchange={(e) => {
+                    ownOpen[sel] = e.currentTarget.checked;
+                    if (!e.currentTarget.checked) {
+                      s.walls[sel].sources = [];
+                      scanWall(sel);
+                    }
+                  }}
+                /><span>Its own folders, instead of the shared sources</span>
+              </label>
+              {#if selOwn}
+                <div class="sources own">
+                  {#each s.walls[sel].sources ?? [] as src (src)}
+                    <span class="source" title={src}>
+                      <span class="nf s-icon">{sourceIcon(src)}</span>
+                      <span class="s-name">{leaf(src)}</span>
+                      <button class="x nf" title="Remove" onclick={() => removeOwn(src)}>{I.close}</button>
+                    </span>
+                  {/each}
+                  <button class="add" onclick={() => addFolder(true)}><span class="nf">{I.plus}</span> Folder</button>
+                  <button class="add" onclick={() => addPlaylist(true)}><span class="nf">{I.plus}</span> Playlist</button>
+                </div>
+                <span class="summary own-summary">
+                  {#if wallScan[sel]?.scanning}
+                    <span class="spin nf">{I.refresh}</span> scanning…
+                  {:else if wallScan[sel]}
+                    <span class="c-img">{wallScan[sel].images.toLocaleString()} images</span> ·
+                    <span class="c-vid">{wallScan[sel].videos.toLocaleString()} videos</span>
+                  {:else}
+                    Add a folder, or drop one on the window. Until then this display plays the shared sources.
+                  {/if}
+                </span>
+              {/if}
+              <span class="sel-hint">Pick a display on the map, then its mode and what it shows below. More options are shared.</span>
             </div>
           {/if}
         </div>
@@ -349,7 +475,7 @@
         {#each MODES as m (m.id)}
           <button class="mode" class:on={L.mode === m.id} onclick={() => (L.mode = m.id)}>
             {@render preview(m.id)}
-            <span class="m-name"><span class="nf">{m.icon}</span>{m.name}<kbd>{m.key}</kbd></span>
+            <span class="m-name"><span class="nf">{m.icon}</span>{MODE_NAMES[m.id]}<kbd>{m.key}</kbd></span>
             <span class="m-line">{m.line}</span>
             {#if L.mode === m.id}<span class="m-check nf">{I.check}</span>{/if}
           </button>
@@ -378,6 +504,54 @@
             step={0.5}
             format={(v) => `${v} s`}
             ends={["restless", "unhurried"]}
+          />
+          <Range
+            label="Focus"
+            bind:value={L.dynamicFocus}
+            min={0}
+            max={1}
+            step={0.1}
+            format={(v) => (v ? `newest ${(1 + 3.5 * v).toFixed(1)}×` : "off")}
+            ends={["all one size", "one large item"]}
+          />
+        {:else if L.mode === "grid"}
+          <GridBuilder bind:cols={L.gridCols} bind:rows={L.gridRows} bind:spans={L.gridSpans} bind:fit={L.gridFit} aspect={selAspect} />
+        {:else if L.mode === "center"}
+          <div class="center-file">
+            <span class="label">In the centre</span>
+            <div class="center-row">
+              {#if L.center}
+                <span class="source" title={L.center}>
+                  <span class="nf s-icon">{I.film}</span>
+                  <span class="s-name">{leaf(L.center)}</span>
+                  <span class="s-path">{parent(L.center)}</span>
+                  <button class="x nf" title="Clear" onclick={() => (L.center = "")}>{I.close}</button>
+                </span>
+              {/if}
+              <button class="add" onclick={chooseCenter}><span class="nf">{I.plus}</span> {L.center ? "Another file" : "Choose a file"}</button>
+              <span class="center-hint">
+                {L.center ? "On the wall," : "Or start without one: on the wall,"} <kbd>C</kbd> puts the item under the pointer in the centre.
+              </span>
+            </div>
+          </div>
+          <Range label="Tiles around it" bind:value={L.centerTiles} min={LIMITS.centerTiles[0]} max={LIMITS.centerTiles[1]} />
+          <Range
+            label="Its size"
+            bind:value={L.centerSize}
+            min={0.3}
+            max={1}
+            step={0.05}
+            format={(v) => `${Math.round(v * 100)}%`}
+            hint="of the largest that fits; smaller if the tiles around need the room"
+          />
+          <Range
+            label="Stillness"
+            bind:value={L.stillness}
+            min={0.2}
+            max={3}
+            step={0.1}
+            format={(v) => v.toFixed(1)}
+            ends={["rearranges freely", "barely moves"]}
           />
         {:else if L.mode === "ribbon"}
           <Range label="Rows" bind:value={L.rows} min={LIMITS.rows[0]} max={LIMITS.rows[1]} />
@@ -431,7 +605,7 @@
     </button>
     {#if more}
       <section class="more">
-        <Range label="Image time" bind:value={s.imageSeconds} min={2} max={30} format={(v) => `${v} s`} hint="Mosaic" />
+        <Range label="Image time" bind:value={s.imageSeconds} min={2} max={30} format={(v) => `${v} s`} hint="Mosaic, Grid, Centre" />
         <Range
           label="Video cap"
           bind:value={s.maxVideoSeconds}
@@ -439,9 +613,9 @@
           max={120}
           step={5}
           format={(v) => (v ? `${v} s` : "full length")}
-          hint="Mosaic: cut long videos"
+          hint="Mosaic, Grid, Centre: cut long videos"
         />
-        <Range label="Loop short clips to" bind:value={s.minVideoSeconds} min={0} max={30} format={(v) => (v ? `${v} s` : "off")} hint="Mosaic" />
+        <Range label="Loop short clips to" bind:value={s.minVideoSeconds} min={0} max={30} format={(v) => (v ? `${v} s` : "off")} hint="Mosaic, Grid, Centre" />
         <Range label="Playback speed" bind:value={s.rate} min={0.25} max={3} step={0.05} format={(v) => `${v.toFixed(2)}×`} />
         <Range label="Volume" bind:value={s.volume} min={0} max={100} step={5} format={(v) => `${v}%`} hint="for the one item with sound (M)" />
         <Range label="Gap" bind:value={s.gap} min={0} max={16} format={(v) => `${v} px`} />
@@ -461,12 +635,12 @@
           max={0.5}
           step={0.05}
           format={(v) => `${Math.round(v * 100)}%`}
-          hint="Mosaic, Dynamic: most of any item that may be cut off"
+          hint="Mosaic, Dynamic, Centre: most of any item that may be cut off"
         />
         <div class="group">
           <span class="label">Under the pointer</span>
           <label class="check"><input type="checkbox" bind:checked={s.hoverPause} /><span>Ribbon / Cascade: the row or column stops</span></label>
-          <label class="check"><input type="checkbox" bind:checked={s.hoverHold} /><span>Mosaic / Dynamic: the tile holds still and keeps its item</span></label>
+          <label class="check"><input type="checkbox" bind:checked={s.hoverHold} /><span>Mosaic / Dynamic / Centre: the tile holds still and keeps its item</span></label>
           <label class="check"><input type="checkbox" bind:checked={s.audioFollowsMouse} /><span>Sound follows the pointer</span></label>
         </div>
         <div class="group">
@@ -478,6 +652,34 @@
           <span class="label">Order</span>
           <label class="check"><input type="checkbox" bind:checked={s.shuffle} /><span>Shuffle</span></label>
           <label class="check"><input type="checkbox" bind:checked={s.stagger} /><span>Feed lanes at varied speeds</span></label>
+        </div>
+        <div class="group">
+          <span class="label">Window</span>
+          <label class="check">
+            <input type="checkbox" bind:checked={s.alwaysOnTop} /><span>Keep the wall above other windows <kbd>T</kbd></span>
+          </label>
+          <span class="gpu-note">Off: another program you bring to the front stays in front of the wall.</span>
+        </div>
+        <div class="select color">
+          <label class="select">
+            <span class="label">Colour</span>
+            <select bind:value={s.color}>
+              <option value="direct">As in the file · like mpv and most viewers</option>
+              <option value="managed">Converted to the display's colour profile</option>
+            </select>
+          </label>
+          {#if staleColor}
+            <span class="gpu-note warn">
+              Needs a restart.
+              <button class="restart" onclick={restart} disabled={restarting}>
+                <span class="nf">{I.refresh}</span>{restarting ? "Restarting…" : "Restart"}
+              </button>
+            </span>
+          {:else}
+            <span class="gpu-note">
+              On a wide-gamut display, converting makes ordinary (sRGB) media look less saturated than it does in other players.
+            </span>
+          {/if}
         </div>
         {#if !multi}
           <label class="select">
@@ -533,11 +735,11 @@
     {/if}
 
     <button class="go" disabled={!canStart} onclick={start}>
-      {#if library.scanning}
+      {#if scanningAny}
         Scanning…
-      {:else if !s.sources.length}
+      {:else if !anySources}
         Add a folder to start
-      {:else if playable === 0}
+      {:else if !canStart}
         Nothing to show with these filters
       {:else}
         <span class="nf">{I.play}</span>
@@ -549,7 +751,7 @@
       <div class="err"><span class="nf">{I.warn}</span> {wallError}</div>
     {/if}
     <p class="foot">
-      On the wall: <kbd>Space</kbd> pause · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> switch mode · <kbd>+</kbd><kbd>−</kbd> count ·
+      On the wall: <kbd>Space</kbd> pause · <kbd>1</kbd>–<kbd>6</kbd> switch mode · <kbd>+</kbd><kbd>−</kbd> count · <kbd>F</kbd> view one item ·
       <kbd>?</kbd> all keys · <kbd>Esc</kbd> back here
     </p>
   </div>
@@ -819,7 +1021,7 @@
   .modes {
     display: grid;
     /* minmax(0, ...) so the previews' max-content strips cannot widen a column */
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
   }
   .mode {
@@ -950,6 +1152,38 @@
     33%, 59% { left: 72%; top: 51%; width: 25%; height: 44%; }
     66%, 92% { left: 35%; top: 65%; width: 33%; height: 30%; }
   }
+  /* Grid: six equal cells that take turns changing colour, never position */
+  .pv-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 3px;
+    padding: 3px;
+  }
+  .pv-grid .g {
+    animation: g 6s ease-in-out infinite;
+  }
+  .pv-grid .g:nth-child(1) { --c: var(--purple); }
+  .pv-grid .g:nth-child(2) { --c: var(--cyan); animation-delay: -1s; }
+  .pv-grid .g:nth-child(3) { --c: var(--green); animation-delay: -2s; }
+  .pv-grid .g:nth-child(4) { --c: var(--yellow); animation-delay: -3s; }
+  .pv-grid .g:nth-child(5) { --c: var(--blue); animation-delay: -4s; }
+  .pv-grid .g:nth-child(6) { --c: var(--purple); animation-delay: -5s; }
+  @keyframes g {
+    0%, 80%, 100% { opacity: 1; }
+    88% { opacity: 0.35; }
+  }
+  /* Centre: one block in the middle, six tiles around it */
+  .pv-center i {
+    position: absolute;
+  }
+  .c0 { --c: var(--purple); left: 31%; top: 22%; width: 38%; height: 56%; background: color-mix(in srgb, var(--purple) 85%, transparent) !important; }
+  .c1 { --c: var(--cyan); left: 3%; top: 5%; width: 26%; height: 43%; }
+  .c2 { --c: var(--green); left: 3%; top: 52%; width: 26%; height: 43%; }
+  .c3 { --c: var(--yellow); left: 71%; top: 5%; width: 26%; height: 43%; }
+  .c4 { --c: var(--blue); left: 71%; top: 52%; width: 26%; height: 43%; }
+  .c5 { --c: var(--cyan); left: 31%; top: 5%; width: 38%; height: 13%; }
+  .c6 { --c: var(--green); left: 31%; top: 82%; width: 38%; height: 13%; }
   .pv-ribbon,
   .pv-cascade {
     display: flex;
@@ -1043,6 +1277,39 @@
   }
   .sc-icon {
     color: var(--purple);
+  }
+  .sc-own {
+    color: var(--yellow);
+    font-size: 10px;
+  }
+  .sources.own {
+    margin: 6px 0 0;
+    padding: 0;
+  }
+  .own-summary {
+    margin-top: 6px;
+  }
+  .center-file {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .center-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .center-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .center-hint kbd {
+    font-size: 10px;
+  }
+  .color {
+    grid-column: span 2;
   }
   .sel-info {
     display: flex;

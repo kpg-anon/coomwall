@@ -23,13 +23,15 @@
     watched: boolean;
     /** Dynamic: videos loop and images stay; the controller's clock replaces them */
     endless: boolean;
+    /** cover fills the tile and crops; contain shows the item whole (Grid) */
+    fit?: "cover" | "contain";
     ondone: (id: number) => void;
     onenter: (tile: TileState) => void;
     onleave: (tile: TileState) => void;
     onopen: (tile: TileState) => void;
   }
 
-  let { tile, gap, paused, unmuted, volume, rate, imageSeconds, minVideo, maxVideo, ring, watched, endless, ondone, onenter, onleave, onopen }: Props = $props();
+  let { tile, gap, paused, unmuted, volume, rate, imageSeconds, minVideo, maxVideo, ring, watched, endless, fit = "cover", ondone, onenter, onleave, onopen }: Props = $props();
 
   interface Layer {
     key: number;
@@ -70,8 +72,8 @@
   function fire() {
     if (fired) return;
     const top = layers[layers.length - 1];
-    if (tile.pinned || (watched && holds < HOLDS)) {
-      if (!tile.pinned) holds++;
+    if (tile.pinned || tile.fixed || (watched && holds < HOLDS)) {
+      if (!tile.pinned && !tile.fixed) holds++;
       elapsed = 0;
       if (top?.media.kind === "video") views[top.key]?.replay();
       return;
@@ -83,7 +85,7 @@
   // image timer and the video length cap; counts only while unpaused and
   // while the current item is actually visible
   $effect(() => {
-    if (endless) return;
+    if (endless || tile.fixed) return;
     const iv = setInterval(() => {
       if (paused || fired) return;
       const top = layers[layers.length - 1];
@@ -102,6 +104,7 @@
   class:leaving={tile.leaving}
   class:ring
   class:pinned={tile.pinned}
+  class:whole={fit === "contain"}
   style:left="{tile.rect.x + gap / 2}px"
   style:top="{tile.rect.y + gap / 2}px"
   style:width="{Math.max(0, tile.rect.w - gap)}px"
@@ -116,11 +119,12 @@
       <MediaView
         bind:this={views[layer.key]}
         media={layer.media}
+        {fit}
         muted={!unmuted || layer !== top}
         {volume}
         {rate}
         {paused}
-        loop={tile.pinned || endless}
+        loop={tile.pinned || endless || !!tile.fixed}
         loopUntil={minVideo}
         onready={() => shown(layer)}
         onended={() => layer === top && fire()}
@@ -152,6 +156,10 @@
   .tile.leaving {
     opacity: 0;
     pointer-events: none;
+  }
+  /* an item shown whole sits on black, not on a panel colour */
+  .tile.whole {
+    background: #000;
   }
   .tile::after {
     content: "";

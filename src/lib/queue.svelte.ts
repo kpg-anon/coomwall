@@ -80,6 +80,19 @@ function probe(entry: MediaEntry, url: string): Promise<Dims | null> {
   });
 }
 
+let extraKey = -1;
+
+/** One file as a Media outside any queue (Centre mode's middle item):
+ * measured if its size is not known yet. Its key is negative, so it can
+ * never collide with a queue's keys. Null when it cannot be played. */
+export async function measureEntry(entry: MediaEntry): Promise<Media | null> {
+  const url = mediaUrl(entry.path);
+  const dims: Dims | null = entry.w && entry.h ? { w: entry.w, h: entry.h, dur: entry.dur } : await probe(entry, url);
+  if (!dims) return null;
+  if (!entry.w || !entry.h) api.rememberDims([{ path: entry.path, size: entry.size, mtime: entry.mtime, w: dims.w, h: dims.h, dur: dims.dur }]).catch(() => {});
+  return { key: extraKey--, path: entry.path, name: baseName(entry.path), kind: entry.kind, url, w: dims.w, h: dims.h, aspect: dims.w / dims.h, dur: dims.dur, skips: 0 };
+}
+
 export class MediaQueue {
   /** measured and ready, in play order */
   ready: Media[] = [];
@@ -103,6 +116,8 @@ export class MediaQueue {
   private flushTimer: ReturnType<typeof setInterval>;
   /** paths currently on the wall, so small libraries avoid showing one file twice */
   onScreen: () => Set<string> = () => new Set();
+  /** a path that is not offered while it is set (Centre's middle item) */
+  private held: string | null = null;
 
   constructor(
     entries: MediaEntry[],
@@ -178,8 +193,8 @@ export class MediaQueue {
     }
     this.failStreak = 0;
     if (!this.shapeOk(dims.w, dims.h)) return;
-    // excluded while it was being measured
-    if (!this.pool.includes(entry)) return;
+    // excluded while it was being measured, or held back
+    if (!this.pool.includes(entry) || entry.path === this.held) return;
     this.ready.push({
       key: this.keySeq++,
       path: entry.path,
@@ -240,6 +255,16 @@ export class MediaQueue {
     this.ready = this.ready.filter((m) => m.path !== path);
     this.readyCount = this.ready.length;
     this.reorder();
+    this.pump();
+  }
+
+  /** Keep one file out of the supply while it is shown some other way
+   * (Centre's middle item); null lets it back in. */
+  hold(path: string | null) {
+    this.held = path;
+    if (!path) return;
+    this.ready = this.ready.filter((m) => m.path !== path);
+    this.readyCount = this.ready.length;
     this.pump();
   }
 

@@ -260,6 +260,20 @@ fn aspect_of(media: &HashMap<u32, f64>, id: u32) -> f64 {
     clamp_aspect(media.get(&id).copied().unwrap_or(1.0))
 }
 
+/// Target relative areas, by tile id. A tile with weight 3 should be three
+/// times the area of a tile with weight 1; tiles not listed have weight 1.
+pub type Weights = HashMap<u32, f64>;
+
+const MIN_WEIGHT: f64 = 0.2;
+const MAX_WEIGHT: f64 = 8.0;
+
+fn weight_of(weights: &Weights, id: u32) -> f64 {
+    match weights.get(&id) {
+        Some(w) if w.is_finite() && *w > 0.0 => w.clamp(MIN_WEIGHT, MAX_WEIGHT),
+        _ => 1.0,
+    }
+}
+
 /// Round a cut to a whole pixel once, so both sides share the same edge and
 /// the leaves cover the rectangle exactly.
 fn snap(start: f64, len: f64, f: f64) -> f64 {
@@ -322,7 +336,10 @@ enum Shape {
 }
 
 /// One tree found by the DP, stored by its children's arena indices.
-/// `lo`/`hi` are the smallest and largest leaf's share of its area.
+/// `lo`/`hi` are the smallest and largest of `share / weight` over its
+/// leaves, where `share` is the leaf's part of the tree's area. With every
+/// weight 1 that is the smallest and largest tile; with weights, `hi / lo` is
+/// how far apart the two worst-served tiles are from their target areas.
 #[derive(Clone, Copy, Debug)]
 struct Cand {
     shape: Shape,
@@ -348,8 +365,8 @@ impl Arena {
         (self.nodes.len() - 1) as u32
     }
 
-    fn leaf(&mut self, index: u32, aspect: f64) -> u32 {
-        self.push(Cand { shape: Shape::Leaf(index), aspect, lo: 1.0, hi: 1.0 })
+    fn leaf(&mut self, index: u32, aspect: f64, weight: f64) -> u32 {
+        self.push(Cand { shape: Shape::Leaf(index), aspect, lo: 1.0 / weight, hi: 1.0 / weight })
     }
 
     fn combine(&self, row: bool, a: u32, b: u32) -> Cand {
@@ -419,14 +436,14 @@ impl Buckets {
 
 /// Every distinct-enough tree over exactly these items (by bitmask DP).
 /// Returns the arena and the root candidates.
-fn subset_dp(aspects: &[f64]) -> (Arena, Vec<u32>) {
+fn subset_dp(aspects: &[f64], weights: &[f64]) -> (Arena, Vec<u32>) {
     let n = aspects.len();
     assert!((1..=12).contains(&n), "subset_dp takes 1..=12 items, got {n}");
     let full = (1usize << n) - 1;
     let mut arena = Arena::default();
     let mut table: Vec<Vec<u32>> = vec![Vec::new(); full + 1];
     for (i, &a) in aspects.iter().enumerate() {
-        table[1 << i] = vec![arena.leaf(i as u32, a)];
+        table[1 << i] = vec![arena.leaf(i as u32, a, weights[i])];
     }
     for mask in 1..=full {
         if mask.count_ones() < 2 {
@@ -462,7 +479,7 @@ fn subset_dp(aspects: &[f64]) -> (Arena, Vec<u32>) {
 
 /// The same DP over aspect classes: items of one class are interchangeable,
 /// so the state is a vector of per-class counts instead of a subset.
-fn class_dp(aspects: &[f64], counts: &[usize]) -> (Arena, Vec<u32>) {
+fn class_dp(aspects: &[f64], weights: &[f64], counts: &[usize]) -> (Arena, Vec<u32>) {
     let k = counts.len();
     let mut strides = vec![1usize; k];
     for c in 1..k {
@@ -473,7 +490,7 @@ fn class_dp(aspects: &[f64], counts: &[usize]) -> (Arena, Vec<u32>) {
     let mut table: Vec<Vec<u32>> = vec![Vec::new(); total];
     for c in 0..k {
         if counts[c] > 0 {
-            table[strides[c]] = vec![arena.leaf(c as u32, aspects[c])];
+            table[strides[c]] = vec![arena.leaf(c as u32, aspects[c], weights[c])];
         }
     }
     let decode = |mut idx: usize| -> Vec<usize> {
@@ -604,7 +621,7 @@ fn top_roots(arena: &Arena, roots: &[u32], target: f64) -> Vec<u32> {
 
 /// The best few trees that put `items` into `rect`, each already turned so
 /// tiles in `prev` move as little as possible.
-fn solve_trees(items: &[(u32, f64)], rect: Rect, prev: &HashMap<u32, Rect>) -> Vec<Tree> {
+fn solve_trees(items: &[(u32, f64)], rect: Rect, prev: &HashMap<u32, Rect>, weights: &Weights) -> Vec<Tree> {
     let target = rect.aspect();
     if items.is_empty() {
         return Vec::new();
@@ -614,40 +631,76 @@ fn solve_trees(items: &[(u32, f64)], rect: Rect, prev: &HashMap<u32, Rect>) -> V
     }
     let trees: Vec<Tree> = if items.len() <= LOCAL_MAX {
         let aspects: Vec<f64> = items.iter().map(|&(_, a)| clamp_aspect(a)).collect();
-        let (arena, roots) = subset_dp(&aspects);
+        let ws: Vec<f64> = items.iter().map(|&(id, _)| weight_of(weights, id)).collect();
+        let (arena, roots) = subset_dp(&aspects, &ws);
         top_roots(&arena, &roots, target)
             .into_iter()
             .map(|r| arena.tree(r, &mut |i| items[i as usize].0))
             .collect()
     } else {
-        class_trees(items, rect, prev)
+        class_trees(items, rect, prev, weights)
     };
     trees.into_iter().map(|t| orient(&t, rect, prev).0).collect()
 }
 
-fn class_trees(items: &[(u32, f64)], rect: Rect, prev: &HashMap<u32, Rect>) -> Vec<Tree> {
-    let lns: Vec<f64> = items.iter().map(|&(_, a)| clamp_aspect(a).ln()).collect();
-    let mut distinct = lns.clone();
-    distinct.sort_by(f64::total_cmp);
-    distinct.dedup_by(|a, b| (*a - *b).abs() < 0.03);
-    let mut k = distinct.len().clamp(1, 6);
-    let (class, means) = loop {
-        let (class, means) = cluster(&lns, k);
-        let mut counts = vec![0usize; means.len()];
-        for &c in &class {
-            counts[c] += 1;
-        }
-        if k == 1 || pair_budget(&counts) <= CLASS_BUDGET {
-            break (class, means);
-        }
-        k -= 1;
+/// Classes for the class DP. Items are first split into tiers of weight (at
+/// most three; with every weight 1 there is one tier), then each tier into
+/// classes of aspect. Returns each item's class and every class's
+/// representative (aspect, weight).
+fn classes(items: &[(u32, f64)], weights: &Weights) -> (Vec<usize>, Vec<(f64, f64)>) {
+    let n = items.len();
+    let lna: Vec<f64> = items.iter().map(|&(_, a)| clamp_aspect(a).ln()).collect();
+    let lnw: Vec<f64> = items.iter().map(|&(id, _)| weight_of(weights, id).ln()).collect();
+    let distinct = |values: &[f64], tol: f64| {
+        let mut v = values.to_vec();
+        v.sort_by(f64::total_cmp);
+        v.dedup_by(|a, b| (*a - *b).abs() < tol);
+        v.len()
     };
-    let mut counts = vec![0usize; means.len()];
+    let (tier, tier_means) = cluster(&lnw, distinct(&lnw, 0.15).clamp(1, 3));
+    let tiers = tier_means.len();
+    let members: Vec<Vec<usize>> = (0..tiers).map(|t| (0..n).filter(|&i| tier[i] == t).collect()).collect();
+    let per_tier_max = if tiers == 1 { 6 } else { 3 };
+    let mut ks: Vec<usize> = members
+        .iter()
+        .map(|m| distinct(&m.iter().map(|&i| lna[i]).collect::<Vec<_>>(), 0.03).clamp(1, per_tier_max))
+        .collect();
+    loop {
+        let mut class = vec![0usize; n];
+        let mut reps: Vec<(f64, f64)> = Vec::new();
+        let mut counts: Vec<usize> = Vec::new();
+        for t in 0..tiers {
+            if members[t].is_empty() {
+                continue;
+            }
+            let values: Vec<f64> = members[t].iter().map(|&i| lna[i]).collect();
+            let (local, means) = cluster(&values, ks[t]);
+            let base = reps.len();
+            counts.extend(std::iter::repeat(0).take(means.len()));
+            for (j, &i) in members[t].iter().enumerate() {
+                class[i] = base + local[j];
+                counts[base + local[j]] += 1;
+            }
+            reps.extend(means.iter().map(|m| (m.exp(), tier_means[t].exp())));
+        }
+        if pair_budget(&counts) <= CLASS_BUDGET || ks.iter().all(|&k| k == 1) {
+            return (class, reps);
+        }
+        // fewer classes in the tier that has the most
+        let widest = (0..tiers).max_by_key(|&t| (ks[t], members[t].len())).unwrap();
+        ks[widest] -= 1;
+    }
+}
+
+fn class_trees(items: &[(u32, f64)], rect: Rect, prev: &HashMap<u32, Rect>, weights: &Weights) -> Vec<Tree> {
+    let (class, reps) = classes(items, weights);
+    let mut counts = vec![0usize; reps.len()];
     for &c in &class {
         counts[c] += 1;
     }
-    let reps: Vec<f64> = means.iter().map(|m| m.exp()).collect();
-    let (arena, roots) = class_dp(&reps, &counts);
+    let aspects: Vec<f64> = reps.iter().map(|r| r.0).collect();
+    let ws: Vec<f64> = reps.iter().map(|r| r.1).collect();
+    let (arena, roots) = class_dp(&aspects, &ws, &counts);
     let mut out = Vec::new();
     for root in top_roots(&arena, &roots, rect.aspect()) {
         // Name every leaf with a placeholder that remembers its class ...
@@ -662,7 +715,7 @@ fn class_trees(items: &[(u32, f64)], rect: Rect, prev: &HashMap<u32, Rect>) -> V
         // (to where they were before) first.
         let slots = layout(&draft, rect);
         let mut map: HashMap<u32, u32> = HashMap::new();
-        for c in 0..means.len() {
+        for c in 0..reps.len() {
             let class_slots: Vec<(u32, Rect)> =
                 slots.iter().filter(|(s, _)| slot_class[s] == c).copied().collect();
             let class_items: Vec<u32> =
@@ -776,6 +829,8 @@ pub struct Params {
     pub allow_global: bool,
     /// Cost per queued item passed over in favour of a better-fitting one.
     pub skip_cost: f64,
+    /// Target relative areas (Dynamic's focus). Empty: every tile the same.
+    pub weights: Weights,
 }
 
 impl Default for Params {
@@ -788,6 +843,7 @@ impl Default for Params {
             in_place_only: false,
             allow_global: true,
             skip_cost: 0.12,
+            weights: Weights::new(),
         }
     }
 }
@@ -851,8 +907,9 @@ fn evaluate(
         let stretch = r.aspect() / aspect_of(media, *id);
         crop += crop_term(stretch);
         worst = worst.max(1.0 - (-stretch.ln().abs()).exp());
-        lo = lo.min(r.area());
-        hi = hi.max(r.area());
+        let served = r.area() / weight_of(&p.weights, *id);
+        lo = lo.min(served);
+        hi = hi.max(served);
         if Some(*id) == exempt {
             continue;
         }
@@ -897,7 +954,7 @@ fn kind_for(path: &[bool], full_depth: usize) -> PlanKind {
 pub fn arrange(items: &[(u32, f64)], bounds: Rect, prev: &HashMap<u32, Rect>, p: &Params) -> Option<Plan> {
     let media: HashMap<u32, f64> = items.iter().copied().collect();
     let mut best: Option<Plan> = None;
-    for tree in solve_trees(items, bounds, prev) {
+    for tree in solve_trees(items, bounds, prev, &p.weights) {
         let e = evaluate(&tree, bounds, prev, &media, p, None);
         if best.as_ref().map_or(true, |b| e.cost < b.cost) {
             best = Some(Plan {
@@ -952,7 +1009,7 @@ pub fn replace(
             let options = if block {
                 let items: Vec<(u32, f64)> = sub.ids().iter().map(|&id| (id, aspect_of(&media2, id))).collect();
                 let mut v = vec![orient(&sub.refit(&media2), rect, &prev).0];
-                v.extend(solve_trees(&items, rect, &prev));
+                v.extend(solve_trees(&items, rect, &prev, &p.weights));
                 v
             } else {
                 vec![sub.clone()]
@@ -1026,7 +1083,7 @@ pub fn insert(
         let rect = rect_at(tree, bounds, &path);
         let mut items: Vec<(u32, f64)> = ids.iter().map(|&id| (id, aspect_of(&media2, id))).collect();
         items.push((new_id, aspect_of(&media2, new_id)));
-        for option in solve_trees(&items, rect, &prev) {
+        for option in solve_trees(&items, rect, &prev, &p.weights) {
             let candidate = tree.with_subtree(&path, option);
             let e = evaluate(&candidate, bounds, &prev, &media2, p, None);
             if best.as_ref().map_or(true, |b| e.cost < b.cost) {
@@ -1088,11 +1145,16 @@ pub fn remove(
             let items: Vec<(u32, f64)> = rest.ids().iter().map(|&id| (id, aspect_of(media, id))).collect();
             let mut options = vec![rest.clone(), orient(&rest.refit(media), rect, &prev).0];
             if items.len() <= LOCAL_MAX {
-                options.extend(solve_trees(&items, rect, &prev));
+                options.extend(solve_trees(&items, rect, &prev, &p.weights));
             }
             for option in options {
                 let candidate = tree.with_subtree(prefix, option);
                 let e = evaluate(&candidate, bounds, &prev, media, p, None);
+                // a frozen tile stays exactly where it is, whatever it costs:
+                // taking its only neighbour away would hand it the freed space
+                if e.rects.iter().any(|(id, r)| others.contains(id) && prev.get(id).is_some_and(|b| movement(b, r) > 0.0)) {
+                    continue;
+                }
                 if best.as_ref().map_or(true, |b| e.cost < b.cost) {
                     best = Some(Plan {
                         tree: candidate,
@@ -1136,6 +1198,388 @@ pub fn reflow(tree: &Tree, bounds: Rect, leaf: u32, aspect: f64, media: &HashMap
     media2.insert(leaf, clamp_aspect(aspect));
     let items: Vec<(u32, f64)> = tree.ids().iter().map(|&id| (id, aspect_of(&media2, id))).collect();
     arrange(&items, bounds, &prev, p)
+}
+
+// ---------------------------------------------------------------------------
+// Centre mode: one item in the middle, the rest around it
+// ---------------------------------------------------------------------------
+
+/// A strip around the centre tile thinner than this share of the wall's
+/// width (or height) is never used.
+const MIN_STRIP_X: f64 = 0.09;
+const MIN_STRIP_Y: f64 = 0.12;
+/// Upper bound on the time spent improving which item goes in which strip.
+const CENTER_MILLIS: u128 = 220;
+/// How many of the cheapest (centre size, frame) pairs are improved.
+const CENTER_FINALISTS: usize = 4;
+/// The centre's own crop counts this many times a tile's: it is the item the
+/// wall is built around, so tiles give way before it does.
+const CENTER_CROP_WEIGHT: f64 = 40.0;
+/// A centre 25% smaller or larger in area than asked for costs this much
+/// (one tile drawn 25% too wide costs 1).
+const CENTER_SIZE_WEIGHT: f64 = 1.0;
+
+/// Sizes to try for the centre tile, as rectangles in whole pixels in the
+/// middle of the wall. The first wish is the item at its own shape, `share`
+/// of the largest size that fits. The strips that leaves must be usable:
+/// each pair (left and right, top and bottom) is either closed or at least
+/// [`MIN_STRIP_X`] / [`MIN_STRIP_Y`] of the wall, at least one pair is open,
+/// and with fewer than four tiles around only one pair is. The other
+/// candidates are smaller sizes at the same shape, the sizes that close one
+/// pair of strips, and the same cropped along one axis; [`arrange_center`]
+/// lays each out and keeps the cheapest.
+fn center_candidates(aspect: f64, share: f64, bounds: Rect, around: usize) -> Vec<Rect> {
+    let a = clamp_aspect(aspect);
+    let (bw, bh) = (bounds.w, bounds.h);
+    let (w0, h0) = if bounds.aspect() > a { (bh * a, bh) } else { (bw, bw / a) };
+    let s = share.clamp(0.25, 1.0);
+    let (cw, ch) = (w0 * s, h0 * s);
+    let (min_x, min_y) = (MIN_STRIP_X * bw, MIN_STRIP_Y * bh);
+    // the widest and tallest a centre can be with that pair of strips open
+    let (open_w, open_h) = (bw - 2.0 * min_x, bh - 2.0 * min_y);
+    let mut sizes = vec![
+        (cw, ch),
+        (cw * 0.87, ch * 0.87),
+        (cw * 0.75, ch * 0.75),
+        (cw * 0.62, ch * 0.62),
+        (cw * 0.5, ch * 0.5),
+        // at its shape: touching top and bottom, or the sides, or as large
+        // as each pair of strips allows
+        ((bh * a).min(bw), bh),
+        (bw, (bw / a).min(bh)),
+        (open_w, open_w / a),
+        (open_h * a, open_h),
+        // cropped along one axis
+        (cw, bh),
+        (bw, ch),
+        (cw.min(open_w), bh),
+        (bw, ch.min(open_h)),
+        (bw, open_h),
+        (open_w, bh),
+    ];
+    sizes.retain(|&(w, h)| {
+        if w > bw + 1e-6 || h > bh + 1e-6 || w < bw * 0.12 || h < bh * 0.12 {
+            return false;
+        }
+        let (mx, my) = ((bw - w) / 2.0, (bh - h) / 2.0);
+        let (x_open, y_open) = (mx > 0.5, my > 0.5);
+        let usable = (!x_open || mx >= min_x - 1e-6) && (!y_open || my >= min_y - 1e-6);
+        let pairs = x_open as usize + y_open as usize;
+        usable && pairs > 0 && pairs * 2 <= around.max(2)
+    });
+    if sizes.is_empty() {
+        sizes.push((open_w, bh));
+    }
+    let mut out: Vec<Rect> = Vec::new();
+    for (w, h) in sizes {
+        let x0 = (bounds.x + (bw - w) / 2.0).round();
+        let y0 = (bounds.y + (bh - h) / 2.0).round();
+        let x1 = (bounds.x + (bw + w) / 2.0).round().min(bounds.x + bw);
+        let y1 = (bounds.y + (bh + h) / 2.0).round().min(bounds.y + bh);
+        let r = Rect::new(x0, y0, x1 - x0, y1 - y0);
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+/// Parts laid end to end along one axis, as nested cuts. `len` is each part's
+/// length in pixels; the cuts land exactly on the part boundaries.
+fn chain(row: bool, mut parts: Vec<(Tree, f64)>) -> Option<Tree> {
+    let (last, mut rest) = parts.pop()?;
+    let mut tree = last;
+    while let Some((t, len)) = parts.pop() {
+        tree = node(row, len / (len + rest), t, tree);
+        rest += len;
+    }
+    Some(tree)
+}
+
+/// The strips around a centre rectangle: left, right, top, bottom.
+/// `sides_full`: the left and right strips run the wall's full height and
+/// the top and bottom ones are as wide as the centre; otherwise the top and
+/// bottom strips run the full width.
+fn strips(c: Rect, b: Rect, sides_full: bool) -> [Rect; 4] {
+    let (right, bottom) = (c.x + c.w, c.y + c.h);
+    if sides_full {
+        [
+            Rect::new(b.x, b.y, c.x - b.x, b.h),
+            Rect::new(right, b.y, b.x + b.w - right, b.h),
+            Rect::new(c.x, b.y, c.w, c.y - b.y),
+            Rect::new(c.x, bottom, c.w, b.y + b.h - bottom),
+        ]
+    } else {
+        [
+            Rect::new(b.x, c.y, c.x - b.x, c.h),
+            Rect::new(right, c.y, b.x + b.w - right, c.h),
+            Rect::new(b.x, b.y, b.w, c.y - b.y),
+            Rect::new(b.x, bottom, b.w, b.y + b.h - bottom),
+        ]
+    }
+}
+
+/// The whole wall from the centre leaf and one subtree per strip (left,
+/// right, top, bottom; None where the strip is empty).
+fn frame(center: u32, regions: &[Rect; 4], trees: [Option<Tree>; 4], c: Rect, sides_full: bool) -> Option<Tree> {
+    let [l, r, t, b] = trees;
+    let leaf = Tree::Leaf { id: center };
+    let part = |tree: Option<Tree>, len: f64| tree.map(|t| (t, len));
+    if sides_full {
+        let mid = chain(false, [part(t, regions[2].h), Some((leaf, c.h)), part(b, regions[3].h)].into_iter().flatten().collect())?;
+        chain(true, [part(l, regions[0].w), Some((mid, c.w)), part(r, regions[1].w)].into_iter().flatten().collect())
+    } else {
+        let mid = chain(true, [part(l, regions[0].w), Some((leaf, c.w)), part(r, regions[1].w)].into_iter().flatten().collect())?;
+        chain(false, [part(t, regions[2].h), Some((mid, c.h)), part(b, regions[3].h)].into_iter().flatten().collect())
+    }
+}
+
+/// One centre size and frame, with its items shared out among the strips.
+struct CenterTry {
+    c: Rect,
+    sides_full: bool,
+    regions: [Rect; 4],
+    /// indices into `regions` of the strips that exist
+    live: Vec<usize>,
+    /// for each item, its strip as an index into `live`
+    assign: Vec<usize>,
+    params: Params,
+    cost: f64,
+    tree: Tree,
+}
+
+struct CenterSolver<'a> {
+    center: (u32, f64),
+    /// the centre's area at the size asked for
+    wanted_area: f64,
+    items: &'a [(u32, f64)],
+    bounds: Rect,
+    prev: &'a HashMap<u32, Rect>,
+    media: HashMap<u32, f64>,
+    base: Params,
+    /// the best tree for one strip rectangle holding one set of items
+    solved: HashMap<([i64; 4], Vec<u32>), Option<Tree>>,
+}
+
+impl CenterSolver<'_> {
+    fn strip_tree(&mut self, rect: Rect, ids: Vec<u32>, params: &Params) -> Option<Tree> {
+        let key = ([rect.x as i64, rect.y as i64, rect.w as i64, rect.h as i64], ids.clone());
+        if let Some(t) = self.solved.get(&key) {
+            return t.clone();
+        }
+        let set: Vec<(u32, f64)> = ids.iter().map(|id| (*id, self.media[id])).collect();
+        let tree = solve_trees(&set, rect, self.prev, &params.weights)
+            .into_iter()
+            .map(|t| (evaluate(&t, rect, self.prev, &self.media, params, None).cost, t))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, t)| t);
+        self.solved.insert(key, tree.clone());
+        tree
+    }
+
+    /// The wall for one assignment, and its cost: the usual score, plus the
+    /// centre's own crop counted heavily and its distance from the size
+    /// asked for.
+    fn build(&mut self, t: &CenterTry, assign: &[usize]) -> Option<(f64, Tree)> {
+        let mut trees: [Option<Tree>; 4] = [None, None, None, None];
+        for (si, &r) in t.live.iter().enumerate() {
+            let mut ids: Vec<u32> = (0..assign.len()).filter(|&i| assign[i] == si).map(|i| self.items[i].0).collect();
+            if ids.is_empty() {
+                return None;
+            }
+            ids.sort_unstable();
+            trees[r] = Some(self.strip_tree(t.regions[r], ids, &t.params)?);
+        }
+        let tree = frame(self.center.0, &t.regions, trees, t.c, t.sides_full)?;
+        let e = evaluate(&tree, self.bounds, self.prev, &self.media, &t.params, None);
+        let own = CENTER_CROP_WEIGHT * crop_term(t.c.aspect() / self.media[&self.center.0])
+            + CENTER_SIZE_WEIGHT * crop_term(t.c.area() / self.wanted_area);
+        Some((e.cost + own, tree))
+    }
+
+    /// A first layout for this centre size and frame: tiles per strip by
+    /// strip area, the tallest strips taking the most upright items.
+    fn seed(&mut self, c: Rect, sides_full: bool) -> Option<CenterTry> {
+        let n = self.items.len();
+        let regions = strips(c, self.bounds, sides_full);
+        let live: Vec<usize> = (0..4).filter(|&r| regions[r].w > 0.5 && regions[r].h > 0.5).collect();
+        if live.is_empty() || live.len() > n {
+            return None;
+        }
+        // the centre is meant to be large: weigh it so that it counts as
+        // one average tile when sizes are compared
+        let mut params = self.base.clone();
+        let around = (self.bounds.area() - c.area()).max(1.0) / n as f64;
+        params.weights.insert(self.center.0, (c.area() / around).clamp(MIN_WEIGHT, 64.0));
+        // How many tiles of the median shape each strip holds without
+        // cropping, stacked in a tall strip or side by side in a flat one.
+        // Tiles are shared out in that proportion, at least one per strip.
+        let mut sorted: Vec<f64> = self.items.iter().map(|i| clamp_aspect(i.1)).collect();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[n / 2];
+        let holds = |r: Rect| if r.h > r.w { r.h * median / r.w } else { r.w / (r.h * median) };
+        let wish: Vec<f64> = live.iter().map(|&r| holds(regions[r]).max(0.05)).collect();
+        let total: f64 = wish.iter().sum();
+        let spare = n - live.len();
+        let ideal: Vec<f64> = wish.iter().map(|w| spare as f64 * w / total).collect();
+        let mut counts: Vec<usize> = ideal.iter().map(|v| 1 + v.floor() as usize).collect();
+        let mut order: Vec<usize> = (0..live.len()).collect();
+        order.sort_by(|&a, &b| (ideal[b] - ideal[b].floor()).total_cmp(&(ideal[a] - ideal[a].floor())));
+        let mut left = n - counts.iter().sum::<usize>();
+        for &i in order.iter().cycle() {
+            if left == 0 {
+                break;
+            }
+            counts[i] += 1;
+            left -= 1;
+        }
+        // the shape a tile gets in each strip with that many tiles; the
+        // strips with the most upright tiles take the most upright items
+        let tile_aspect = |si: usize| {
+            let (r, k) = (regions[live[si]], counts[si] as f64);
+            if r.h > r.w { r.w * k / r.h } else { r.w / (k * r.h) }
+        };
+        let mut by_aspect: Vec<usize> = (0..n).collect();
+        by_aspect.sort_by(|&a, &b| self.items[a].1.total_cmp(&self.items[b].1));
+        let mut strip_order: Vec<usize> = (0..live.len()).collect();
+        strip_order.sort_by(|&a, &b| tile_aspect(a).total_cmp(&tile_aspect(b)));
+        let mut assign = vec![0usize; n];
+        let mut next = by_aspect.into_iter();
+        for &si in &strip_order {
+            for _ in 0..counts[si] {
+                if let Some(i) = next.next() {
+                    assign[i] = si;
+                }
+            }
+        }
+        let mut t = CenterTry { c, sides_full, regions, live, assign, params, cost: 0.0, tree: Tree::Leaf { id: self.center.0 } };
+        let assign = t.assign.clone();
+        let (cost, tree) = self.build(&t, &assign)?;
+        t.cost = cost;
+        t.tree = tree;
+        Some(t)
+    }
+
+    /// Move one item to another strip, or swap two between strips, for as
+    /// long as the wall's cost falls and there is time.
+    fn improve(&mut self, t: &mut CenterTry, deadline: std::time::Instant) {
+        let n = self.items.len();
+        loop {
+            let mut improved = false;
+            // worst-fitting items first: the time goes where it helps most
+            let now: HashMap<u32, Rect> = layout(&t.tree, self.bounds).into_iter().collect();
+            let misfit = |i: usize| (now[&self.items[i].0].aspect() / self.media[&self.items[i].0]).ln().abs();
+            let mut turn: Vec<usize> = (0..n).collect();
+            turn.sort_by(|&a, &b| misfit(b).total_cmp(&misfit(a)));
+            for i in turn {
+                for si in 0..t.live.len() {
+                    if si == t.assign[i] || t.assign.iter().filter(|&&a| a == t.assign[i]).count() < 2 {
+                        continue;
+                    }
+                    let mut trial = t.assign.clone();
+                    trial[i] = si;
+                    if let Some((cost, tree)) = self.build(t, &trial) {
+                        if cost < t.cost - 1e-9 {
+                            (t.cost, t.tree, t.assign) = (cost, tree, trial);
+                            improved = true;
+                        }
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return;
+                    }
+                }
+                for j in 0..n {
+                    if t.assign[i] == t.assign[j] {
+                        continue;
+                    }
+                    let mut trial = t.assign.clone();
+                    trial.swap(i, j);
+                    if let Some((cost, tree)) = self.build(t, &trial) {
+                        if cost < t.cost - 1e-9 {
+                            (t.cost, t.tree, t.assign) = (cost, tree, trial);
+                            improved = true;
+                        }
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return;
+                    }
+                }
+            }
+            if !improved {
+                return;
+            }
+        }
+    }
+}
+
+/// Centre mode: tile `center` (id, aspect) shows one item in the middle of
+/// the wall, and `items` fill the strips around it. `share` is the size
+/// asked for, as a part of the largest size at which the item fits the wall.
+///
+/// The centre's size is part of the search. A size that keeps the item's
+/// shape and the size asked for is cheapest, but with few tiles around it
+/// that can leave strips no tile fits; then a smaller centre, or one that
+/// closes a pair of strips, costs less overall (see [`center_candidates`]).
+///
+/// Each strip is a block of the slicing tree, solved like any other block.
+/// Which item goes to which strip is a local search: tiles are first shared
+/// out by strip area, then single items move to another strip or swap with
+/// an item of another strip while the whole wall's cost falls.
+///
+/// Keep the centre in `Params::frozen` afterwards: [`replace`], [`insert`]
+/// and [`remove`] never re-solve a block that holds a frozen tile, so every
+/// later change stays inside one strip.
+pub fn arrange_center(
+    center: (u32, f64),
+    share: f64,
+    items: &[(u32, f64)],
+    bounds: Rect,
+    prev: &HashMap<u32, Rect>,
+    p: &Params,
+) -> Option<Plan> {
+    let started = std::time::Instant::now();
+    let n = items.len();
+    let aspect = clamp_aspect(center.1);
+    let mut media: HashMap<u32, f64> = items.iter().map(|&(id, a)| (id, clamp_aspect(a))).collect();
+    media.insert(center.0, aspect);
+    let mut base = p.clone();
+    base.frozen.retain(|id| *id != center.0);
+    let finish = |tree: Tree, p: &Params| {
+        let e = evaluate(&tree, bounds, prev, &media, p, None);
+        Plan { tree, rects: placed(e.rects), kind: PlanKind::Global, choice: 0, region: Some(bounds), cost: e.cost, moved: e.moved, worst_crop: e.worst }
+    };
+    if n == 0 {
+        return Some(finish(Tree::Leaf { id: center.0 }, &base));
+    }
+    if n == 1 {
+        // nothing to centre it between: the two side by side, or stacked
+        let pair = [(center.0, aspect), items[0]];
+        base.weights.insert(center.0, 3.0);
+        return solve_trees(&pair, bounds, prev, &base.weights)
+            .into_iter()
+            .map(|t| finish(t, &base))
+            .min_by(|a, b| a.cost.total_cmp(&b.cost));
+    }
+    let fit = if bounds.aspect() > aspect { bounds.h * bounds.h * aspect } else { bounds.w * bounds.w / aspect };
+    let share = share.clamp(0.25, 1.0);
+    let mut solver = CenterSolver { center: (center.0, aspect), wanted_area: fit * share * share, items, bounds, prev, media: media.clone(), base, solved: HashMap::new() };
+    let mut tries: Vec<CenterTry> = Vec::new();
+    for c in center_candidates(aspect, share, bounds, n) {
+        let both = c.x - bounds.x > 0.5 && c.y - bounds.y > 0.5;
+        for sides_full in if both { vec![true, false] } else { vec![true] } {
+            tries.extend(solver.seed(c, sides_full));
+        }
+    }
+    tries.sort_by(|a, b| a.cost.total_cmp(&b.cost));
+    tries.truncate(CENTER_FINALISTS);
+    let left = tries.len();
+    for (i, t) in tries.iter_mut().enumerate() {
+        // what is left of the time, shared between the finalists still to do
+        let spent = started.elapsed().as_millis();
+        let slice = CENTER_MILLIS.saturating_sub(spent) / (left - i) as u128;
+        solver.improve(t, std::time::Instant::now() + std::time::Duration::from_millis(slice as u64));
+    }
+    tries.into_iter().min_by(|a, b| a.cost.total_cmp(&b.cost)).map(|t| finish(t.tree, &t.params))
 }
 
 // ---------------------------------------------------------------------------
@@ -1421,6 +1865,134 @@ mod tests {
         assert_eq!(plan.rects.len(), 16);
         assert_tiles_cover(&plan.tree, SCREEN);
         assert!(ms < 2000.0);
+    }
+
+    #[test]
+    fn weights_set_relative_areas() {
+        // one tile asked to be 4x the others: it ends up the largest by far,
+        // and the plain layout of the same items does not have such a tile
+        let mut rng = Rng(17);
+        for n in [5u32, 7, 9, 12, 16] {
+            let (mut ratio_sum, mut plain_sum, rounds) = (0.0, 0.0, 30);
+            for _ in 0..rounds {
+                let items: Vec<(u32, f64)> = (1..=n).map(|id| (id, rng.aspect())).collect();
+                let hero = 1 + rng.pick(n as usize) as u32;
+                let p = Params { weights: [(hero, 4.0)].into_iter().collect(), ..Params::default() };
+                let plan = arrange(&items, SCREEN, &HashMap::new(), &p).unwrap();
+                assert_tiles_cover(&plan.tree, SCREEN);
+                let rects = rect_map(&plan);
+                let others: f64 = rects.iter().filter(|(id, _)| **id != hero).map(|(_, r)| r.area()).sum::<f64>() / (n - 1) as f64;
+                ratio_sum += rects[&hero].area() / others;
+                assert!(plan.worst_crop <= p.max_crop + 1e-9, "n={n}: crop {}", plan.worst_crop);
+                let plain = arrange(&items, SCREEN, &HashMap::new(), &Params::default()).unwrap();
+                let rects = rect_map(&plain);
+                let others: f64 = rects.iter().filter(|(id, _)| **id != hero).map(|(_, r)| r.area()).sum::<f64>() / (n - 1) as f64;
+                plain_sum += rects[&hero].area() / others;
+            }
+            let (ratio, plain) = (ratio_sum / rounds as f64, plain_sum / rounds as f64);
+            eprintln!("weights: {n} tiles, hero asked 4.0x, got {ratio:.2}x (unweighted {plain:.2}x)");
+            assert!(ratio > 2.2, "n={n}: the hero is only {ratio:.2}x the others");
+            assert!(plain < 1.6, "n={n}: unweighted hero {plain:.2}x");
+        }
+    }
+
+    #[test]
+    fn center_tile_sits_in_the_middle_at_its_own_shape() {
+        let mut rng = Rng(61);
+        let (mut worst, mut slowest) = (0.0f64, 0.0f64);
+        let (mut crop_sum, mut tiles, mut size_sum, mut walls) = (0.0, 0usize, 0.0, 0usize);
+        for round in 0..150 {
+            let n = 2 + rng.pick(15);
+            let items: Vec<(u32, f64)> = (1..=n as u32).map(|id| (id, rng.aspect())).collect();
+            let aspect = [9.0 / 16.0, 16.0 / 9.0, 1.0, 4.0 / 5.0, 21.0 / 9.0][rng.pick(5)];
+            let share = 0.35 + rng.next() * 0.5;
+            let bounds = if round % 3 == 0 { Rect::new(2.0, 2.0, 1196.0, 1916.0) } else { SCREEN };
+            let started = Instant::now();
+            let plan = arrange_center((99, aspect), share, &items, bounds, &HashMap::new(), &Params::default()).unwrap();
+            slowest = slowest.max(started.elapsed().as_secs_f64() * 1000.0);
+            assert_tiles_cover(&plan.tree, bounds);
+            assert_eq!(plan.rects.len(), n + 1, "round {round}");
+            let c = rect_map(&plan)[&99];
+            let (cx, cy) = c.centre();
+            let (bx, by) = bounds.centre();
+            assert!((cx - bx).abs() <= 1.0 && (cy - by).abs() <= 1.0, "round {round}: centre tile at {c:?}");
+            if n >= 4 {
+                // enough tiles for strips on every side: the centre keeps
+                // its own shape, and the tiles around keep theirs
+                let off = (c.aspect() / aspect).ln().abs();
+                assert!(off < 0.08, "round {round}: centre {c:?} for aspect {aspect}, {n} around");
+                let fit = if bounds.aspect() > aspect { bounds.h * bounds.h * aspect } else { bounds.w * bounds.w / aspect };
+                size_sum += c.area() / (fit * share * share);
+                walls += 1;
+                for placed in &plan.rects {
+                    if placed.id != 99 {
+                        let a = items.iter().find(|i| i.0 == placed.id).unwrap().1;
+                        let crop = 1.0 - (-(placed.rect.aspect() / a).ln().abs()).exp();
+                        worst = worst.max(crop);
+                        crop_sum += crop;
+                        tiles += 1;
+                    }
+                }
+            }
+        }
+        let mean = crop_sum / tiles as f64;
+        eprintln!(
+            "centre, 4-16 tiles around: mean crop {:.1}%, worst {:.0}%, centre area {:.0}% of what was asked, slowest layout {slowest:.0} ms",
+            mean * 100.0,
+            worst * 100.0,
+            size_sum / walls as f64 * 100.0
+        );
+        assert!(mean < 0.12, "mean crop around the centre {mean}");
+        assert!(slowest < 1500.0);
+        // alone it fills the wall; with one other tile the two share it
+        let alone = arrange_center((99, 1.0), 0.5, &[], SCREEN, &HashMap::new(), &Params::default()).unwrap();
+        assert_eq!(rect_map(&alone)[&99], SCREEN);
+        let two = arrange_center((99, 1.0), 0.5, &[(1, 0.6)], SCREEN, &HashMap::new(), &Params::default()).unwrap();
+        assert_tiles_cover(&two.tree, SCREEN);
+        assert!(rect_map(&two)[&99].area() > rect_map(&two)[&1].area());
+        // the same shape as the wall at 95%: strips this thin are not kept,
+        // and the centre must not swallow the wall
+        let items: Vec<(u32, f64)> = (1..=6).map(|id| (id, rng.aspect())).collect();
+        let tight = arrange_center((99, 16.0 / 9.0), 0.95, &items, SCREEN, &HashMap::new(), &Params::default()).unwrap();
+        assert_eq!(tight.rects.len(), 7);
+        assert!(rect_map(&tight)[&99].area() < SCREEN.area() * 0.9);
+    }
+
+    #[test]
+    fn a_frozen_center_never_moves() {
+        let mut rng = Rng(8);
+        let n = 8u32;
+        let items: Vec<(u32, f64)> = (1..=n).map(|id| (id, rng.aspect())).collect();
+        let plan = arrange_center((99, 16.0 / 9.0), 0.55, &items, SCREEN, &HashMap::new(), &Params::default()).unwrap();
+        let home = rect_map(&plan)[&99];
+        let mut media: HashMap<u32, f64> = items.iter().copied().collect();
+        media.insert(99, 16.0 / 9.0);
+        let p = Params { frozen: vec![99], ..Params::default() };
+        let mut tree = plan.tree;
+        for _ in 0..400 {
+            let leaf = 1 + rng.pick(n as usize) as u32;
+            let cands: Vec<f64> = (0..6).map(|_| rng.aspect()).collect();
+            let next = replace(&tree, SCREEN, leaf, &media, &cands, &p).unwrap();
+            assert_eq!(rect_map(&next)[&99], home);
+            media.insert(leaf, cands[next.choice]);
+            tree = next.tree;
+        }
+        // more tiles, then fewer: the centre still has not moved
+        for id in 20..26 {
+            let a = rng.aspect();
+            let next = insert(Some(&tree), SCREEN, id, a, &media, &p).unwrap();
+            media.insert(id, a);
+            tree = next.tree;
+            assert_eq!(layout(&tree, SCREEN).into_iter().find(|(i, _)| *i == 99).unwrap().1, home);
+            assert_tiles_cover(&tree, SCREEN);
+        }
+        while let Some(next) = remove(&tree, SCREEN, None, &media, &p) {
+            tree = next.tree;
+            assert_eq!(layout(&tree, SCREEN).into_iter().find(|(i, _)| *i == 99).unwrap().1, home);
+            assert_tiles_cover(&tree, SCREEN);
+        }
+        // every strip keeps its last tile: removing it would move the centre
+        assert!(tree.len() >= 3, "{} tiles left", tree.len());
     }
 
     #[test]

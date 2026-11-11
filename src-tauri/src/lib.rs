@@ -33,6 +33,15 @@ pub fn run() {
                 args.push(' ');
                 args.push_str(&arg);
             }
+            // Chromium converts every colour to the display's profile. On a
+            // wide-gamut panel that sends sRGB red (255, 0, 0) out as about
+            // (212, 51, 33), so media looks less saturated than in players
+            // that do not colour-manage (mpv, most image viewers). "direct",
+            // the default, treats the display as sRGB: values go out as they
+            // are in the file.
+            if state.color == "direct" {
+                args.push_str(" --force-color-profile=srgb");
+            }
             // dev only: CW_CDP_PORT=9444 opens a DevTools Protocol port without
             // replacing the args above, as WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS would
             #[cfg(debug_assertions)]
@@ -76,6 +85,7 @@ pub fn run() {
             commands::plan_remove,
             commands::plan_retile,
             commands::plan_reflow,
+            commands::plan_center,
             commands::plan_layout,
             commands::get_settings,
             commands::set_settings,
@@ -84,10 +94,12 @@ pub fn run() {
             commands::hide_item,
             commands::unhide_items,
             commands::gpu_info,
+            commands::launch_color,
             commands::restart,
             walls::open_walls,
             walls::close_walls,
             walls::move_wall,
+            walls::focus_wall,
         ])
         .run(tauri::generate_context!())
         .expect("error while running coomwall");

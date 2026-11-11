@@ -142,6 +142,16 @@ pub async fn move_wall(app: AppHandle, state: State<'_, AppState>, window: Webvi
     Ok(moved)
 }
 
+/// The pointer moved onto a wall that does not have focus: keys should go to
+/// the wall under the pointer. Focus is taken only from another window of
+/// this app. When another program is in front, the walls stay behind it;
+/// `set_focus` would force this window to the foreground over it.
+#[tauri::command]
+pub fn focus_wall(app: AppHandle, window: WebviewWindow) -> bool {
+    let ours = app.webview_windows().into_iter().any(|(label, w)| label != window.label() && w.is_focused().unwrap_or(false));
+    ours && window.set_focus().is_ok()
+}
+
 /// Esc on any wall: close them all. The last one to go brings setup back.
 #[tauri::command]
 pub fn close_walls(app: AppHandle) {
