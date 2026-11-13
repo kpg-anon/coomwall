@@ -19,6 +19,10 @@ export interface Media {
   dur: number | null;
   /** times passed over for a better-fitting item */
   skips: number;
+  /** a video from a resumed session: seconds to start at (MediaView seeks once) */
+  start?: number;
+  /** a streamed link whose sound is a separate stream (YouTube above 360p) */
+  audioUrl?: string;
 }
 
 /** A queued item passed over this often is placed next, fit or not. */
@@ -82,7 +86,7 @@ function probe(entry: MediaEntry, url: string): Promise<Dims | null> {
 
 let extraKey = -1;
 
-/** One file as a Media outside any queue (Centre mode's middle item):
+/** One file as a Media outside any queue (Center mode's middle item):
  * measured if its size is not known yet. Its key is negative, so it can
  * never collide with a queue's keys. Null when it cannot be played. */
 export async function measureEntry(entry: MediaEntry): Promise<Media | null> {
@@ -93,6 +97,12 @@ export async function measureEntry(entry: MediaEntry): Promise<Media | null> {
   return { key: extraKey--, path: entry.path, name: baseName(entry.path), kind: entry.kind, url, w: dims.w, h: dims.h, aspect: dims.w / dims.h, dur: dims.dur, skips: 0 };
 }
 
+/** A link played straight from the site's streams (links.ts resolveLink).
+ * `path` stays the page link, so a saved wall resolves it again. */
+export function remoteMedia(path: string, name: string, video: string, audio: string | null, w: number, h: number, dur: number | null): Media {
+  return { key: extraKey--, path, name, kind: "video", url: video, audioUrl: audio ?? undefined, w, h, aspect: w / h, dur, skips: 0 };
+}
+
 export class MediaQueue {
   /** measured and ready, in play order */
   ready: Media[] = [];
@@ -100,6 +110,11 @@ export class MediaQueue {
   readyCount = $state(0);
   /** set when every item has been tried and none could be played */
   empty = $state(false);
+  /** set when two passes of the folder found nothing `accept` takes, and
+   * nothing was taken since it was set: no file fits at all */
+  noneFit = $state(false);
+  /** files of the wrong shape or too long, taken out of the pool */
+  leftOut = $state(0);
   readonly total: number;
 
   private pool: MediaEntry[];
@@ -109,25 +124,38 @@ export class MediaQueue {
   private target = 18;
   private keySeq = 1;
   private failStreak = 0;
-  /** entries passed over in a row because they were already on the wall */
-  private screenSkips = 0;
+  /** entries in a row that gave nothing: already on the wall, or not
+   * taken by `accept` */
+  private dry = 0;
+  /** pumping stopped after two dry passes; a take or a new filter starts it */
+  private starved = false;
+  /** `accept` has taken something since it was set */
+  private fitAny = false;
   private waiters: (() => void)[] = [];
   private learned: DimRecord[] = [];
   private flushTimer: ReturnType<typeof setInterval>;
   /** paths currently on the wall, so small libraries avoid showing one file twice */
   onScreen: () => Set<string> = () => new Set();
-  /** a path that is not offered while it is set (Centre's middle item) */
+  /** a path that is not offered while it is set (Center's middle item) */
   private held: string | null = null;
+  /** only items of these shapes are offered (Grid's "only media that fits") */
+  private accept: ((aspect: number) => boolean) | null = null;
 
   constructor(
     entries: MediaEntry[],
     private type: TypeFilter,
     private shape: ShapeFilter,
     private doShuffle: boolean,
+    /** videos longer than this many seconds are never offered; 0 = no limit */
+    private maxVideo = 0,
   ) {
     this.pool = entries.filter((e) => type === "mixed" || (type === "images" ? e.kind === "image" : e.kind === "video"));
+    const typed = this.pool.length;
     // with cached dimensions the shape filter applies before anything loads
     if (shape !== "any") this.pool = this.pool.filter((e) => !e.w || !e.h || this.shapeOk(e.w, e.h));
+    // and so does the length limit, with a cached duration
+    if (maxVideo > 0) this.pool = this.pool.filter((e) => this.lengthOk(e.kind, e.dur));
+    this.leftOut = typed - this.pool.length;
     this.total = this.pool.length;
     this.reorder();
     this.flushTimer = setInterval(() => this.flush(), 4000);
@@ -136,6 +164,40 @@ export class MediaQueue {
 
   private shapeOk(w: number, h: number): boolean {
     return this.shape === "any" || (this.shape === "portrait" ? h > w : w >= h);
+  }
+
+  /** The file's own duration, not adjusted for playback speed. Unknown passes. */
+  private lengthOk(kind: Kind, dur: number | null): boolean {
+    return this.maxVideo <= 0 || kind !== "video" || dur == null || dur <= this.maxVideo;
+  }
+
+  /** Take an entry out of the pool for good, keeping the pass in progress:
+   * `order` holds pool indices, so the ones above it shift down. */
+  private drop(entry: MediaEntry) {
+    const i = this.pool.indexOf(entry);
+    // already gone (measured twice at once in a small pool, or excluded)
+    if (i < 0) return;
+    this.pool.splice(i, 1);
+    this.leftOut++;
+    const k = this.order.indexOf(i);
+    if (k >= 0) {
+      this.order.splice(k, 1);
+      if (k < this.cursor) this.cursor--;
+    }
+    for (let j = 0; j < this.order.length; j++) if (this.order[j] > i) this.order[j]--;
+    if (!this.pool.length) this.setEmpty();
+  }
+
+  /** Nothing left to offer: say so and release everyone waiting. */
+  private setEmpty() {
+    this.empty = true;
+    this.wake();
+  }
+
+  private wake() {
+    const w = this.waiters;
+    this.waiters = [];
+    w.forEach((f) => f());
   }
 
   private reorder() {
@@ -151,10 +213,10 @@ export class MediaQueue {
   }
 
   pump() {
-    while (!this.empty && this.inflight < 4 && this.ready.length + this.inflight < this.target) {
+    while (!this.empty && !this.starved && this.inflight < 4 && this.ready.length + this.inflight < this.target) {
       const entry = this.nextEntry();
       if (!entry) {
-        this.empty = true;
+        this.setEmpty();
         return;
       }
       this.inflight++;
@@ -166,14 +228,14 @@ export class MediaQueue {
   }
 
   private async measure(entry: MediaEntry) {
-    // Skip files already on the wall, unless a whole pass found every one
-    // there (a feed can hold more items than the folder has). Without that
-    // limit, skip -> finally -> pump is a microtask loop that never yields.
-    if (this.pool.length > 24 && this.screenSkips < this.pool.length && this.onScreen().has(entry.path)) {
-      this.screenSkips++;
+    // Skip files already on the wall, unless a whole pass gave nothing new
+    // (a feed can hold more items than the folder has; with a shape filter
+    // only a few files may fit, and then they repeat). Without that limit,
+    // skip -> finally -> pump is a microtask loop that never yields.
+    if (this.pool.length > 24 && this.dry < this.pool.length && this.onScreen().has(entry.path)) {
+      this.dry++;
       return;
     }
-    this.screenSkips = 0;
     const url = mediaUrl(entry.path);
     let dims: Dims | null = entry.w && entry.h ? { w: entry.w, h: entry.h, dur: entry.dur } : null;
     if (!dims) {
@@ -188,13 +250,43 @@ export class MediaQueue {
     if (!dims) {
       this.unplayable++;
       // every item in the pool failed in a row: nothing here can play
-      if (++this.failStreak >= this.pool.length) this.empty = true;
+      if (++this.failStreak >= this.pool.length) this.setEmpty();
       return;
     }
     this.failStreak = 0;
-    if (!this.shapeOk(dims.w, dims.h)) return;
-    // excluded while it was being measured, or held back
-    if (!this.pool.includes(entry) || entry.path === this.held) return;
+    // Wrong shape or too long: never offered, so it leaves the pool. Its
+    // dimensions are now on the entry, so leaving it in would reject it again
+    // without awaiting anything, and a pool of only such entries would make
+    // skip -> finally -> pump a microtask loop that never yields.
+    if (!this.shapeOk(dims.w, dims.h) || !this.lengthOk(entry.kind, dims.dur)) {
+      this.drop(entry);
+      return;
+    }
+    if (this.accept && !this.accept(dims.w / dims.h)) {
+      // two passes with nothing taken (the second one allows repeats): stop,
+      // or this would go round for ever
+      if (++this.dry >= 2 * this.pool.length) {
+        this.starved = true;
+        this.noneFit = !this.fitAny;
+        this.wake();
+      }
+      return;
+    }
+    // Held back (Center's middle item). This also returns without awaiting
+    // when the dimensions are cached, so a pool with nothing else in it would
+    // loop the same way: two passes of it and pumping stops until hold()
+    // changes or something is taken.
+    if (entry.path === this.held) {
+      if (++this.dry >= 2 * this.pool.length) {
+        this.starved = true;
+        this.wake();
+      }
+      return;
+    }
+    this.dry = 0;
+    this.fitAny = true;
+    // excluded while it was being measured
+    if (!this.pool.includes(entry)) return;
     this.ready.push({
       key: this.keySeq++,
       path: entry.path,
@@ -208,9 +300,7 @@ export class MediaQueue {
       skips: 0,
     });
     this.readyCount = this.ready.length;
-    const w = this.waiters;
-    this.waiters = [];
-    w.forEach((f) => f());
+    this.wake();
   }
 
   /** Up to `k` ready items, in order, to choose from. An item passed over
@@ -226,17 +316,68 @@ export class MediaQueue {
     const m = this.ready.splice(i, 1)[0] ?? null;
     for (let j = 0; j < Math.min(i, this.ready.length); j++) this.ready[j].skips++;
     this.readyCount = this.ready.length;
+    // what is on the wall changed: a file that was skipped may be offered now
+    this.starved = false;
+    this.dry = 0;
     this.pump();
     return m;
   }
 
+  /** `m` again (a tile going back through what it showed), under a new key:
+   * the tile may still hold a layer with the old one. */
+  again(m: Media): Media {
+    return { ...m, key: this.keySeq++, skips: 0, start: undefined };
+  }
+
+  /** Items of a resumed session back on the wall, by path, in order: each
+   * as a Media under a new key of this queue, or null when the file is not
+   * in this wall's supply (gone, hidden, left out by Show, Shape or the
+   * video length limit) or cannot be played. Claimed files leave `ready`,
+   * so the queue does not offer them again at once. */
+  async claim(paths: string[]): Promise<(Media | null)[]> {
+    const byPath = new Map(this.pool.map((e) => [e.path, e]));
+    const dims = await Promise.all(
+      paths.map(async (path): Promise<Dims | null> => {
+        const entry = byPath.get(path);
+        if (!entry) return null;
+        if (entry.w && entry.h) return { w: entry.w, h: entry.h, dur: entry.dur };
+        const d = await probe(entry, mediaUrl(path));
+        if (d && !entry.w) {
+          entry.w = d.w;
+          entry.h = d.h;
+          entry.dur = d.dur;
+          this.learned.push({ path, size: entry.size, mtime: entry.mtime, w: d.w, h: d.h, dur: d.dur });
+        }
+        return d;
+      }),
+    );
+    const out = paths.map((path, i): Media | null => {
+      const entry = byPath.get(path);
+      const d = dims[i];
+      // excluded while it was measured
+      if (!entry || !d || !this.pool.includes(entry)) return null;
+      // the shape and length filters apply as in measure(); an uncached
+      // file of the wrong shape leaves the pool here
+      if (!this.shapeOk(d.w, d.h) || !this.lengthOk(entry.kind, d.dur)) {
+        this.drop(entry);
+        return null;
+      }
+      return { key: this.keySeq++, path, name: baseName(path), kind: entry.kind, url: mediaUrl(path), w: d.w, h: d.h, aspect: d.w / d.h, dur: d.dur, skips: 0 };
+    });
+    const taken = new Set(out.filter((m) => m).map((m) => m!.path));
+    this.ready = this.ready.filter((m) => !taken.has(m.path));
+    this.readyCount = this.ready.length;
+    this.pump();
+    return out;
+  }
+
   /** Resolves once `n` items are ready, or after `timeout` ms, or when empty. */
   wait(n = 1, timeout = 8000): Promise<void> {
-    if (this.ready.length >= n || this.empty) return Promise.resolve();
+    if (this.ready.length >= n || this.empty || this.noneFit) return Promise.resolve();
     return new Promise((resolve) => {
       const t = setTimeout(resolve, timeout);
       const check = () => {
-        if (this.ready.length >= n || this.empty) {
+        if (this.ready.length >= n || this.empty || this.noneFit) {
           clearTimeout(t);
           resolve();
         } else this.waiters.push(check);
@@ -258,13 +399,32 @@ export class MediaQueue {
     this.pump();
   }
 
+  /** Offer only items whose shape `f` takes (Grid's "only media that
+   * fits"), or any shape (null). Items already ready that do not fit go. */
+  setAccept(f: ((aspect: number) => boolean) | null) {
+    this.accept = f;
+    this.dry = 0;
+    this.starved = false;
+    this.fitAny = false;
+    this.noneFit = false;
+    if (f) {
+      this.ready = this.ready.filter((m) => f(m.aspect));
+      this.readyCount = this.ready.length;
+    }
+    this.pump();
+  }
+
   /** Keep one file out of the supply while it is shown some other way
-   * (Centre's middle item); null lets it back in. */
+   * (Center's middle item); null lets it back in. */
   hold(path: string | null) {
     this.held = path;
-    if (!path) return;
-    this.ready = this.ready.filter((m) => m.path !== path);
-    this.readyCount = this.ready.length;
+    // a file that was held back may be offered now
+    this.starved = false;
+    this.dry = 0;
+    if (path) {
+      this.ready = this.ready.filter((m) => m.path !== path);
+      this.readyCount = this.ready.length;
+    }
     this.pump();
   }
 

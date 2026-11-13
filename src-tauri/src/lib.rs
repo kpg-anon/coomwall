@@ -1,7 +1,9 @@
 mod commands;
 mod gpu;
 mod media;
+mod sessions;
 mod walls;
+mod ytdl;
 
 use tauri::Manager;
 
@@ -96,10 +98,19 @@ pub fn run() {
             commands::gpu_info,
             commands::launch_color,
             commands::restart,
+            sessions::list_sessions,
+            sessions::get_session,
+            sessions::put_session_wall,
+            sessions::delete_session,
+            sessions::set_resume,
+            sessions::take_resume,
             walls::open_walls,
             walls::close_walls,
             walls::move_wall,
             walls::focus_wall,
+            ytdl::fetch_link,
+            ytdl::links_dir,
+            ytdl::resolve_link,
         ])
         .run(tauri::generate_context!())
         .expect("error while running coomwall");

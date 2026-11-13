@@ -20,6 +20,10 @@ vite.config.js.timestamp-*
 /.claude/
 /AGENTS.md
 
-# Local test data: generated media, the CW_DATA_DIR profile, perf logs
-/testmedia/
+# Local test data: the CW_DATA_DIR profile (generated test media lives in
+# docs/testmedia/, gitignored with docs/)
 /.devdata/
+
+# marketing video project (local-only; the screenshots it renders are
+# committed in screenshots/)
+/marketing/

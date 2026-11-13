@@ -12,11 +12,14 @@
 // are not all one size: the newest item is the largest and tiles shrink as
 // they age (`dynamicFocus`), so the eye has one place to go after each change.
 //
-// Centre mode is Mosaic around one fixed tile: a chosen item plays in the
-// middle at its own shape and never moves; the strips around it are blocks of
-// the same tree and change the way Mosaic's blocks do.
+// With the center on, Mosaic and Dynamic are laid out around one fixed tile:
+// a chosen item plays in the middle at its own shape and never moves. In
+// Mosaic the strips around it are blocks of the same tree and change the way
+// Mosaic's blocks do; in Dynamic every change lays the strips out again.
 import { api, type MediaMap, type Params, type Plan, type Rect, type Tree } from "./api";
 import type { Media, MediaQueue } from "./queue.svelte";
+import type { Pan } from "./session";
+import { resizeLeaf } from "./tree";
 import { LIMITS, type Settings } from "./settings.svelte";
 
 export interface TileState {
@@ -29,12 +32,20 @@ export interface TileState {
   /** performance.now() when its rectangle last changed */
   movedAt: number;
   leaving: boolean;
-  /** Centre mode's middle tile: loops, is never replaced and never moves */
+  /** the center tile: loops, is never replaced and never moves */
   fixed?: boolean;
+  /** the visible part of the item, as object-position in percent (0 to 100
+   * on each axis) and a zoom; centered and not zoomed when absent. Cleared
+   * when the media changes. */
+  pan?: Pan;
+  /** what it showed before `media`, most recent last (at most HISTORY) */
+  back?: Media[];
+  /** what it stepped back from (B), the next to show again last */
+  fwd?: Media[];
 }
 
-/** What MosaicView and Wall need from a wall made of tiles (Mosaic, Dynamic,
- * Centre and Grid). */
+/** What MosaicView and Wall need from a wall made of tiles (Mosaic, Dynamic
+ * and Grid). */
 export interface TileWall {
   tiles: TileState[];
   hovered: number | null;
@@ -48,7 +59,16 @@ export interface TileWall {
   readonly fit?: "cover" | "contain";
   done(id: number, urgent?: boolean): void;
   next(id: number): void;
+  /** B: the item the tile showed before. False when it has none. */
+  prev(id: number): boolean;
+  /** a file left the wall: out of every tile's history as well */
+  forget(path: string): void;
   togglePin(id: number): void;
+  /** Shift+drag on a pinned or center tile; undefined centers it again */
+  setPan(id: number, pan: TileState["pan"]): void;
+  /** Shift+↑↓ on a pinned tile: one step larger or smaller. Null when it
+   * changed, else why not, in words for the HUD. */
+  resizeTile(id: number, grow: boolean): Promise<string | null>;
   retile(): unknown;
   resize(bounds: Rect): unknown;
   destroy(): void;
@@ -77,6 +97,88 @@ function same(a: Rect, b: Rect): boolean {
   return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
 }
 
+/** how many earlier items a tile keeps */
+const HISTORY = 20;
+
+/** A tile of a resumed session (session.ts): its item, or null when the
+ * file is no longer available, and what it had. */
+export interface TileSeed {
+  id: number;
+  media: Media | null;
+  pinned: boolean;
+  pan?: Pan;
+  /** ms since its item arrived */
+  age?: number;
+}
+
+/** What a resumed wall starts from instead of the queue. */
+export interface WallSeed {
+  tiles: TileSeed[];
+  /** Mosaic, Dynamic: the saved arrangement, and the area it was laid out in */
+  tree: Tree | null;
+  bounds: Rect | null;
+  /** the center tile's id in `tree` */
+  centerId: number | null;
+  centerPan?: Pan;
+}
+
+/** the tile ids in a layout tree; null when it is not one */
+function leafIds(t: Tree, out: number[] = []): number[] | null {
+  if (!t || typeof t !== "object") return null;
+  if (t.k === "leaf") {
+    if (typeof t.id !== "number") return null;
+    out.push(t.id);
+    return out;
+  }
+  if ((t.k !== "row" && t.k !== "col") || !(t.f > 0 && t.f < 1)) return null;
+  return leafIds(t.a, out) && leafIds(t.b, out);
+}
+
+/** The item a tile's history gives next: on a step back (B) the last one it
+ * showed, otherwise the last one it stepped back from. Null: none, and the
+ * queue gives the next item. It stays in the history until `advance`. */
+export function fromHistory(tile: TileState, back: boolean): Media | null {
+  const list = back ? tile.back : tile.fwd;
+  return list?.length ? list[list.length - 1] : null;
+}
+
+/** Put the next item in `tile` and keep its history. `taken`: an item just
+ * taken from the queue; null: the one fromHistory(tile, back) gives, shown
+ * under a new key. What the tile showed goes on `fwd` for a step back and on
+ * `back` otherwise, unless `keepOut` says it may not come back (the center
+ * item, a file removed from the wall). */
+export function advance(tile: TileState, queue: MediaQueue, back: boolean, taken: Media | null, keepOut: (path: string) => boolean) {
+  let m = taken;
+  if (!m) {
+    const h = (back ? tile.back : tile.fwd)?.pop();
+    if (!h) return;
+    m = queue.again(h);
+  }
+  const was = tile.media;
+  if (!keepOut(was.path)) {
+    // pushed through `tile`, not through the array just assigned: `tile` is
+    // $state, which wraps that array, and a push to the unwrapped one is not seen
+    if (back) {
+      if (!tile.fwd) tile.fwd = [];
+      tile.fwd.push(was);
+    } else {
+      if (!tile.back) tile.back = [];
+      tile.back.push(was);
+      if (tile.back.length > HISTORY) tile.back.splice(0, tile.back.length - HISTORY);
+    }
+  }
+  tile.media = m;
+  tile.since = performance.now();
+}
+
+/** Take `path` out of every tile's history. */
+export function forgetIn(tiles: TileState[], path: string) {
+  for (const t of tiles) {
+    if (t.back) t.back = t.back.filter((m) => m.path !== path);
+    if (t.fwd) t.fwd = t.fwd.filter((m) => m.path !== path);
+  }
+}
+
 export class MosaicController implements TileWall {
   tiles = $state<TileState[]>([]);
   hovered = $state<number | null>(null);
@@ -99,13 +201,18 @@ export class MosaicController implements TileWall {
   private lastGlobalAt = -Infinity;
   private clock: ReturnType<typeof setInterval> | undefined;
   private waited = 0;
+  /** steps back asked for (B) and not finished yet, by tile */
+  private backs = new Map<number, number>();
+  /** files removed from the wall, kept out of the tiles' histories */
+  private gone = new Set<string>();
+  private keepOut = (path: string) => path === this.center?.path || this.gone.has(path);
 
   constructor(
     private queue: MediaQueue,
     private s: Settings,
     private bounds: Rect,
     readonly dynamic = false,
-    /** Centre mode: the item in the middle */
+    /** the center item, when the center is on */
     private center: Media | null = null,
   ) {
     queue.onScreen = () => new Set(this.tiles.map((t) => t.media.path));
@@ -128,7 +235,7 @@ export class MosaicController implements TileWall {
     if (this.waited < this.s.dynamicSeconds * 1000 || this.pumping || this.pending.length) return;
     const held = this.held;
     const oldest = this.live()
-      .filter((t) => !t.pinned && t.id !== held)
+      .filter((t) => !t.pinned && !t.fixed && t.id !== held)
       .sort((a, b) => a.since - b.since)[0];
     if (!oldest) return;
     this.waited = 0;
@@ -145,7 +252,7 @@ export class MosaicController implements TileWall {
     return this.tiles.filter((t) => !t.leaving);
   }
 
-  /** the tiles that take items from the queue: all but Centre's middle tile */
+  /** the tiles that take items from the queue: all but the center tile */
   private around(): TileState[] {
     return this.tiles.filter((t) => !t.leaving && !t.fixed);
   }
@@ -156,28 +263,34 @@ export class MosaicController implements TileWall {
     return m;
   }
 
+  /** Dynamic: target relative areas by age, newest first in `ids`. The
+   * newest is the largest, the next few are in between, the rest are 1. */
+  private ageWeights(ids: number[]): Record<number, number> | undefined {
+    const focus = this.dynamic ? this.s.dynamicFocus : 0;
+    if (focus <= 0 || ids.length < 3) return undefined;
+    const out: Record<number, number> = { [ids[0]]: 1 + 3.5 * focus };
+    const second = Math.max(1, Math.round((ids.length - 1) / 4));
+    for (const id of ids.slice(1, 1 + second)) out[id] = 1 + 1.3 * focus;
+    return out;
+  }
+
   /** Target relative areas.
    *
-   * Dynamic: by age. The newest tile (`newest`, or the one that arrived
-   * last) is the largest, the next few are in between, the rest are 1.
+   * Dynamic: by age (`ageWeights`). The tile `newest`, or the one that
+   * arrived last, counts as the newest.
    *
-   * Centre: the middle tile is meant to be large, so it is given the weight
-   * that makes it count as one average tile when sizes are compared. */
+   * The center tile is meant to be large, so it is given the weight that
+   * makes it count as one average tile when sizes are compared. */
   private weights(newest: number | null = null): Record<number, number> | undefined {
+    const rest = this.around();
+    const byAge = [...rest].sort((a, b) => (b.id === newest ? Infinity : b.since) - (a.id === newest ? Infinity : a.since));
+    const out: Record<number, number> = { ...this.ageWeights(byAge.map((t) => t.id)) };
     const fixed = this.live().find((t) => t.fixed);
-    if (fixed) {
-      const rest = this.around();
-      if (!rest.length) return undefined;
+    if (fixed && rest.length) {
       const mean = rest.reduce((sum, t) => sum + t.rect.w * t.rect.h, 0) / rest.length;
-      return { [fixed.id]: Math.max(0.2, (fixed.rect.w * fixed.rect.h) / Math.max(1, mean)) };
+      out[fixed.id] = Math.max(0.2, (fixed.rect.w * fixed.rect.h) / Math.max(1, mean));
     }
-    const focus = this.dynamic ? this.s.dynamicFocus : 0;
-    const byAge = this.live().sort((a, b) => (b.id === newest ? Infinity : b.since) - (a.id === newest ? Infinity : a.since));
-    if (focus <= 0 || byAge.length < 3) return undefined;
-    const out: Record<number, number> = { [byAge[0].id]: 1 + 3.5 * focus };
-    const second = Math.max(1, Math.round((byAge.length - 1) / 4));
-    for (const t of byAge.slice(1, 1 + second)) out[t.id] = 1 + 1.3 * focus;
-    return out;
+    return Object.keys(out).length ? out : undefined;
   }
 
   private params(inPlaceOnly = false, newest: number | null = null): Params {
@@ -223,18 +336,26 @@ export class MosaicController implements TileWall {
     if (plan.region && plan.kind !== "swap") this.region = { rect: plan.region, kind: plan.kind, seq: ++this.seq };
   }
 
-  start(count: number) {
+  /** The first tiles: `count` items from the queue, or a resumed session's
+   * (`seed`). A seed whose files are all still there and whose tree fits
+   * comes back in its saved arrangement; otherwise its items are laid out
+   * afresh, with queue items in place of the missing ones. */
+  start(count: number, seed?: WallSeed) {
     return this.serial(async () => {
       this.status = "Loading…";
-      await this.queue.wait(count, 10000);
-      const picked: Media[] = [];
+      if (seed && (await this.restore(seed))) return;
+      const kept = seed?.tiles.filter((t) => t.media) ?? [];
+      if (seed) count = seed.tiles.length;
+      await this.queue.wait(count - kept.length, 10000);
+      const picked: Media[] = kept.map((t) => t.media!);
       while (picked.length < count) {
         const m = this.queue.take(0);
         if (!m) break;
         picked.push(m);
       }
       if (!picked.length && !this.center) {
-        this.status = this.queue.empty ? "Nothing here can be played." : "Still loading…";
+        // an empty queue: the wall says why (nothing plays, or the filters left nothing)
+        this.status = this.queue.empty ? "" : "Still loading…";
         if (!this.queue.empty && this.alive) setTimeout(() => this.alive && this.start(count), 1500);
         return;
       }
@@ -244,30 +365,31 @@ export class MosaicController implements TileWall {
       // Dynamic: ages one interval apart, so the first tile picked is the
       // newest (and largest) and the clock retires the last one first
       const age = (i: number) => (this.dynamic ? i * this.s.dynamicSeconds * 1000 : 0);
-      const fresh = (id: number, media: Media, i: number, fixed = false): TileState => ({
-        id,
-        media,
-        rect: { x: 0, y: 0, w: 0, h: 0 },
-        pinned: false,
-        since: now - FRESH_MS - age(i),
-        movedAt: now - FRESH_MS,
-        leaving: false,
-        fixed,
-      });
+      const fresh = (id: number, media: Media, i: number, fixed = false): TileState => {
+        // a resumed tile keeps its pin and pan (set here, at creation:
+        // Tile clears the pan when an existing tile's item changes)
+        const k = fixed ? undefined : kept[i];
+        return {
+          id,
+          media,
+          rect: { x: 0, y: 0, w: 0, h: 0 },
+          pinned: k?.pinned ?? false,
+          pan: fixed ? seed?.centerPan : k?.pan,
+          since: k?.age !== undefined ? now - k.age : now - FRESH_MS - age(i),
+          movedAt: now - FRESH_MS,
+          leaving: false,
+          fixed,
+        };
+      };
       let plan: Plan | null;
       let staged: TileState[];
+      const params = { ...this.params(), weights: this.ageWeights(items.map((it) => it.id)) };
       if (this.center) {
         const cid = this.nextId++;
         staged = [fresh(cid, this.center, 0, true), ...items.map((it, i) => fresh(it.id, picked[i], i))];
-        plan = await api.planCenter({ center: { id: cid, aspect: this.center.aspect }, share: this.s.centerSize, items, bounds: this.bounds, prev: null, params: this.params() });
+        plan = await api.planCenter({ center: { id: cid, aspect: this.center.aspect }, share: this.s.centerSize, items, bounds: this.bounds, prev: null, params });
       } else {
         staged = items.map((it, i) => fresh(it.id, picked[i], i));
-        const params = this.params();
-        const focus = this.dynamic ? this.s.dynamicFocus : 0;
-        if (focus > 0 && items.length >= 3) {
-          const second = Math.max(1, Math.round((items.length - 1) / 4));
-          params.weights = Object.fromEntries(items.slice(0, 1 + second).map((it, i) => [it.id, i === 0 ? 1 + 3.5 * focus : 1 + 1.3 * focus]));
-        }
         plan = await api.planInitial(items, this.bounds, params);
       }
       if (!plan || !this.alive) return;
@@ -277,6 +399,55 @@ export class MosaicController implements TileWall {
       this.apply(plan, t0);
       this.status = "";
     });
+  }
+
+  /** A resumed session in its saved arrangement: the saved tree, laid out
+   * for this screen. False (nothing changed) when a file is missing or the
+   * tree does not hold exactly the saved tiles; start() then lays the items
+   * out afresh. */
+  private async restore(seed: WallSeed): Promise<boolean> {
+    const { tiles, tree, centerId } = seed;
+    if (!tree || !tiles.length || tiles.some((t) => !t.media)) return false;
+    // the center tile is in the tree when the center is on, and only then
+    if (!!this.center !== (centerId != null)) return false;
+    const ids = new Set(tiles.map((t) => t.id));
+    if (centerId != null) ids.add(centerId);
+    const leaves = leafIds(tree);
+    if (!leaves || leaves.length !== ids.size || ids.size !== tiles.length + (centerId != null ? 1 : 0) || leaves.some((id) => !ids.has(id))) return false;
+    let placed: Map<number, Rect>;
+    try {
+      placed = new Map((await api.planLayout(tree, this.bounds)).map((p) => [p.id, p.rect]));
+    } catch (e) {
+      console.warn("mosaic: saved layout not usable", e);
+      return false;
+    }
+    if (!this.alive) return true;
+    const now = performance.now();
+    const staged: TileState[] = tiles.map((t) => ({
+      id: t.id,
+      media: t.media!,
+      rect: placed.get(t.id)!,
+      pinned: t.pinned,
+      pan: t.pan,
+      since: now - (t.age ?? FRESH_MS),
+      movedAt: now - FRESH_MS,
+      leaving: false,
+    }));
+    if (this.center && centerId != null) staged.unshift({ id: centerId, media: this.center, rect: placed.get(centerId)!, pinned: false, pan: seed.centerPan, since: now, movedAt: now - FRESH_MS, leaving: false, fixed: true });
+    this.tree = tree;
+    this.nextId = Math.max(...ids) + 1;
+    this.tiles = staged;
+    this.status = "";
+    // On a screen of another shape the tree is scaled to fit, as on a
+    // resize; the center item would be stretched, so it is laid out again
+    const b = seed.bounds;
+    if (this.center && b && (Math.abs(b.w - this.bounds.w) > 1 || Math.abs(b.h - this.bounds.h) > 1)) await this.recenter();
+    return true;
+  }
+
+  /** the layout tree now, for a saved session */
+  get layoutTree(): Tree | null {
+    return this.tree;
   }
 
   /** A tile finished its image time or its video. */
@@ -305,13 +476,37 @@ export class MosaicController implements TileWall {
   }
 
   private async replace(id: number): Promise<boolean> {
+    const back = this.backs.has(id);
+    try {
+      return await this.change(id, back);
+    } finally {
+      if (back) {
+        // B was pressed again while this step was waiting or being made:
+        // the next step back goes first, while the tile has one to make
+        const t = this.tiles.find((x) => x.id === id && !x.leaving);
+        const left = t && !t.pinned && fromHistory(t, true) ? (this.backs.get(id) ?? 1) - 1 : 0;
+        if (left > 0) {
+          this.backs.set(id, left);
+          if (!this.pending.includes(id)) this.pending.unshift(id);
+        } else this.backs.delete(id);
+      }
+    }
+  }
+
+  /** The next item into tile `id`, laid out for its shape: on a step back
+   * (B) the item it showed before, else the one it stepped back from, else
+   * the best fit of what the queue offers. */
+  private async change(id: number, back: boolean): Promise<boolean> {
     const tile = this.tiles.find((t) => t.id === id && !t.leaving);
     if (!tile || !this.tree || tile.pinned || tile.fixed) return false;
+    // from the tile's history: the only candidate, placed whatever its fit
+    const chosen = fromHistory(tile, back);
+    if (back && !chosen) return false;
     const watched = this.held === id;
     // with a tile pinned or held, Dynamic changes stay local like Mosaic's,
     // so that tile keeps its place
-    if (this.dynamic && this.held === null && !this.live().some((t) => t.pinned)) return this.reflow(tile);
-    let candidates = this.queue.peek(10, !watched);
+    if (this.dynamic && this.held === null && !this.live().some((t) => t.pinned)) return this.center ? this.reflowCenter(tile, back, chosen) : this.reflow(tile, back, chosen);
+    let candidates = chosen ? [chosen] : this.queue.peek(10, !watched);
     if (!candidates.length) {
       await this.queue.wait(1, 6000);
       candidates = this.queue.peek(10, !watched);
@@ -331,28 +526,42 @@ export class MosaicController implements TileWall {
       });
     let plan = await ask(candidates);
     // A long-skipped item is placed even when it fits badly, but not when
-    // the only place for it would crop it past the limit (its neighbours are
+    // the only place for it would crop it past the limit (its neighbors are
     // frozen, say). Then the best fit from the queue goes there instead.
-    if (plan && candidates.length === 1 && this.cropOf(plan, id, candidates[0]) > this.s.maxCrop) {
+    // An item from the history was asked for by name and is placed as it is.
+    if (!chosen && plan && candidates.length === 1 && this.cropOf(plan, id, candidates[0]) > this.s.maxCrop) {
       const open = this.queue.peek(10, false);
       if (open.length > 1) {
         const second = await ask(open);
         if (second && this.cropOf(second, id, open[second.choice]) < this.cropOf(plan, id, candidates[0])) plan = second;
       }
     }
-    if (!plan || !this.alive) return false;
-    const next = this.queue.take(plan.choice);
-    if (!next) return false;
-    tile.media = next;
-    tile.since = performance.now();
+    if (!plan || !this.alive || !this.put(tile, back, chosen, plan.choice)) return false;
     this.apply(plan, t0);
     return plan.kind !== "swap";
   }
 
-  /** Dynamic: the next item into `tile`, and the whole wall laid out again. */
-  private async reflow(tile: TileState): Promise<boolean> {
-    if (!this.queue.peek(1).length) await this.queue.wait(1, 6000);
-    const [c] = this.queue.peek(1);
+  /** Put the item a plan was made for into `tile`: `chosen` from its
+   * history, or else item `i` of the queue's last peek. False when it is no
+   * longer there; the history then keeps what it has. */
+  private put(tile: TileState, back: boolean, chosen: Media | null, i: number): boolean {
+    if (chosen) {
+      // forget() may have taken it out while the plan was being made
+      if (fromHistory(tile, back) !== chosen) return false;
+      advance(tile, this.queue, back, null, this.keepOut);
+      return true;
+    }
+    const next = this.queue.take(i);
+    if (!next) return false;
+    advance(tile, this.queue, false, next, this.keepOut);
+    return true;
+  }
+
+  /** Dynamic: the next item into `tile` (`chosen`, from its history, or the
+   * queue's next), and the whole wall laid out again. */
+  private async reflow(tile: TileState, back: boolean, chosen: Media | null): Promise<boolean> {
+    if (!chosen && !this.queue.peek(1).length) await this.queue.wait(1, 6000);
+    const c = chosen ?? this.queue.peek(1)[0];
     if (!c || !this.tree) return false;
     const t0 = performance.now();
     const plan = await api.planReflow({
@@ -365,11 +574,36 @@ export class MosaicController implements TileWall {
       // as the largest
       params: this.params(false, tile.id),
     });
-    if (!plan || !this.alive) return false;
-    const next = this.queue.take(0);
-    if (!next) return false;
-    tile.media = next;
-    tile.since = performance.now();
+    if (!plan || !this.alive || !this.put(tile, back, chosen, 0)) return false;
+    this.apply(plan, t0);
+    return plan.moved > 0;
+  }
+
+  /** Dynamic with the center on: the next item into `tile` (as in reflow),
+   * and the strips around the center laid out again. The center itself
+   * never moves. */
+  private async reflowCenter(tile: TileState, back: boolean, chosen: Media | null): Promise<boolean> {
+    const fixed = this.live().find((t) => t.fixed);
+    if (!fixed) return false;
+    if (!chosen && !this.queue.peek(1).length) await this.queue.wait(1, 6000);
+    const c = chosen ?? this.queue.peek(1)[0];
+    if (!c || !this.alive) return false;
+    const t0 = performance.now();
+    // the new item's tile counts as new: where it was does not matter
+    const prev = Object.fromEntries(this.live().filter((t) => t.id !== tile.id).map((t) => [t.id, $state.snapshot(t.rect)]));
+    const rest = this.around();
+    const byAge = [tile.id, ...rest.filter((t) => t.id !== tile.id).sort((a, b) => b.since - a.since).map((t) => t.id)];
+    const plan = await api.planCenter({
+      center: { id: fixed.id, aspect: fixed.media.aspect },
+      share: this.s.centerSize,
+      items: rest.map((t) => ({ id: t.id, aspect: t.id === tile.id ? c.aspect : t.media.aspect })),
+      bounds: this.bounds,
+      prev,
+      params: { ...this.params(), stillness: DYNAMIC_STILLNESS, frozen: [], weights: this.ageWeights(byAge) },
+      // the center stays exactly where it is; only the strips change
+      at: $state.snapshot(fixed.rect),
+    });
+    if (!plan || !this.alive || !this.put(tile, back, chosen, 0)) return false;
     this.apply(plan, t0);
     return plan.moved > 0;
   }
@@ -381,9 +615,9 @@ export class MosaicController implements TileWall {
     return 1 - Math.exp(-Math.abs(Math.log(r.w / r.h / m.aspect)));
   }
 
-  /** How many tiles take items: all of them, or in Centre those around the middle. */
+  /** How many tiles take items: all of them, or with the center on, those around it. */
   setCount(n: number) {
-    const [lo, hi] = this.center ? LIMITS.centerTiles : LIMITS.tiles;
+    const [lo, hi] = LIMITS.tiles;
     n = Math.max(lo, Math.min(hi, n));
     if (this.center) return this.serial(() => this.recenter(n));
     return this.serial(async () => {
@@ -441,13 +675,18 @@ export class MosaicController implements TileWall {
     return true;
   }
 
-  /** Centre: lay the wall out again around the middle tile, with `count`
-   * tiles around it (default: as many as now). The centre's size depends on
+  /** Center on: lay the wall out again around the center tile, with `count`
+   * tiles around it (default: as many as now). The center's size depends on
    * how many tiles there are to fill the strips, so a count change is a new
-   * layout, not an insert. Tiles on screen stay near where they are. */
-  private async recenter(count?: number): Promise<void> {
+   * layout, not an insert. Tiles on screen stay near where they are.
+   *
+   * `grow`: the size was changed by a key. The size asked for is only the
+   * largest the solver may use, so a larger setting can still come back
+   * smaller (a smaller center fits the tiles around it better). A layout that
+   * moves the wrong way (or not at all) is not used; returns whether it was. */
+  private async recenter(count?: number, grow?: boolean): Promise<boolean> {
     const fixed = this.live().find((t) => t.fixed);
-    if (!fixed || !this.center) return;
+    if (!fixed || !this.center) return false;
     let keep = this.around();
     const n = count ?? keep.length;
     const added: TileState[] = [];
@@ -472,10 +711,16 @@ export class MosaicController implements TileWall {
       items: all.map((t) => ({ id: t.id, aspect: t.media.aspect })),
       bounds: this.bounds,
       prev,
-      params: { ...this.params(), stillness: 0.15, frozen: [], weights: undefined },
+      params: { ...this.params(), stillness: 0.15, frozen: [], weights: this.ageWeights([...all].sort((a, b) => b.since - a.since).map((t) => t.id)) },
     });
-    if (!plan || !this.alive) return;
+    if (!plan || !this.alive) return false;
     const rects = rectMap(plan);
+    if (grow !== undefined) {
+      const before = fixed.rect.w * fixed.rect.h;
+      const r = rects.get(fixed.id);
+      const after = r ? r.w * r.h : before;
+      if (grow ? after <= before * 1.01 : after >= before * 0.99) return false;
+    }
     for (const t of added) {
       t.rect = rects.get(t.id)!;
       this.tiles.push(t);
@@ -483,19 +728,65 @@ export class MosaicController implements TileWall {
     this.leave(new Set(plan.rects.map((p) => p.id)));
     this.apply(plan, t0);
     await sleep(SETTLE_MS);
+    return true;
   }
 
-  /** Centre: another item in the middle. The wall is laid out again for its shape. */
+  /** The center item one step larger or smaller (its size setting was just
+   * changed). False when no layout with that setting moves it that way. */
+  resizeCenter(grow: boolean): Promise<boolean> {
+    return this.serial(() => this.recenter(undefined, grow));
+  }
+
+  /** An item in the center, or another one there. The wall is laid out again
+   * for its shape; the tiles already up stay on the wall. */
   setCenter(m: Media) {
     return this.serial(async () => {
-      const fixed = this.live().find((t) => t.fixed);
-      if (!fixed) return;
+      let fixed = this.live().find((t) => t.fixed);
+      const now = performance.now();
+      if (!fixed) {
+        // it grows out of the middle of the wall
+        const b = this.bounds;
+        this.tiles.push({ id: this.nextId++, media: m, rect: { x: b.x + b.w / 2, y: b.y + b.h / 2, w: 0, h: 0 }, pinned: false, since: now, movedAt: now, leaving: false, fixed: true });
+        fixed = this.tiles[this.tiles.length - 1];
+      }
       this.center = m;
+      // the center item does not come back into a tile by B or N either
+      forgetIn(this.tiles, m.path);
       fixed.media = m;
-      fixed.since = performance.now();
+      fixed.since = now;
       // it may have been one of the tiles around
       for (const t of this.around()) if (t.media.path === m.path) this.done(t.id, true);
       await this.recenter();
+    });
+  }
+
+  /** The center off: its tile leaves and the others fill the wall. */
+  clearCenter() {
+    return this.serial(async () => {
+      const fixed = this.live().find((t) => t.fixed);
+      this.center = null;
+      if (!fixed || !this.tree) return;
+      if (!this.around().length) {
+        // nothing around it (the queue had only the center's file): there is
+        // no tile to fill the hole, so the wall starts again from the queue.
+        // Not awaited: start() queues behind this step on the same chain.
+        this.leave(new Set());
+        this.tree = null;
+        this.start(this.s.tiles);
+        return;
+      }
+      const t0 = performance.now();
+      const media = { ...this.media(), [fixed.id]: fixed.media.aspect };
+      const params = { ...this.params(), frozen: [], weights: undefined };
+      const plan = await api.planRemove({ tree: this.tree, bounds: this.bounds, leaf: fixed.id, media, params });
+      if (!plan || !this.alive) return;
+      this.leave(new Set(plan.rects.map((p) => p.id)));
+      this.apply(plan, t0);
+      await sleep(SETTLE_MS);
+      // what was left is a hole filled by its neighbors; lay the wall out properly
+      const again = await api.planRetile({ tree: this.tree!, bounds: this.bounds, media: this.media(), params: this.params() });
+      if (again && this.alive) this.apply(again, performance.now());
+      await sleep(SETTLE_MS);
     });
   }
 
@@ -516,7 +807,7 @@ export class MosaicController implements TileWall {
     this.bounds = bounds;
     return this.serial(async () => {
       if (!this.tree) return;
-      // scaling would stretch the middle tile; Centre lays out again
+      // scaling would stretch the middle tile; Center lays out again
       if (this.center) return this.recenter();
       const rects = new Map((await api.planLayout(this.tree, bounds)).map((p) => [p.id, p.rect]));
       for (const t of this.tiles) {
@@ -531,6 +822,42 @@ export class MosaicController implements TileWall {
     if (t && !t.fixed) t.pinned = !t.pinned;
   }
 
+  setPan(id: number, pan: TileState["pan"]) {
+    const t = this.tiles.find((x) => x.id === id);
+    if (t) t.pan = pan;
+  }
+
+  /** A pinned tile one step (1.25× its area) larger or smaller. The cuts of
+   * the two splits around it move (tree.ts); the tiles inside those splits
+   * get smaller or larger, everything else stays where it is. A split that
+   * holds another pinned tile or the center is left alone. */
+  resizeTile(id: number, grow: boolean): Promise<string | null> {
+    return this.serial(async () => {
+      const tile = this.live().find((t) => t.id === id);
+      if (!tile?.pinned || !this.tree) return "pin a tile (P) to change its size";
+      const keep = new Set(this.live().filter((t) => t.id !== id && (t.pinned || t.fixed)).map((t) => t.id));
+      const r = resizeLeaf(this.tree, this.bounds, id, grow ? 1.25 : 0.8, keep);
+      if ("reason" in r) {
+        if (r.reason === "blocked") return "another pinned tile or the centered media is in the way";
+        if (r.reason === "alone") return "it already fills the wall";
+        return grow ? "as large as it gets here" : "as small as it gets here";
+      }
+      const placed = await api.planLayout(r.tree, this.bounds);
+      if (!this.alive) return null;
+      this.tree = r.tree;
+      const now = performance.now();
+      for (const p of placed) {
+        const t = this.tiles.find((x) => x.id === p.id);
+        if (t && !same(t.rect, p.rect)) {
+          t.rect = p.rect;
+          t.movedAt = now;
+        }
+      }
+      this.lastMoveAt = now;
+      return null;
+    });
+  }
+
   next(id: number) {
     const t = this.tiles.find((x) => x.id === id);
     if (!t || t.fixed) return;
@@ -538,9 +865,28 @@ export class MosaicController implements TileWall {
     this.done(id, true);
   }
 
+  prev(id: number): boolean {
+    const t = this.tiles.find((x) => x.id === id && !x.leaving);
+    const asked = this.backs.get(id) ?? 0;
+    // steps back already asked for and not made yet use up the history too
+    if (!t || t.fixed || (t.back?.length ?? 0) <= asked) return false;
+    t.pinned = false;
+    this.backs.set(id, asked + 1);
+    // to the front, also when it was already waiting (its item ended)
+    this.pending = this.pending.filter((p) => p !== id);
+    this.done(id, true);
+    return true;
+  }
+
+  forget(path: string) {
+    this.gone.add(path);
+    forgetIn(this.tiles, path);
+  }
+
   destroy() {
     this.alive = false;
     this.pending = [];
+    this.backs.clear();
     clearInterval(this.clock);
   }
 }

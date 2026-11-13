@@ -3,6 +3,8 @@
 //! owns the wall's state and Rust holds only the dimension cache.
 
 use crate::gpu::{self, GpuInfo};
+use crate::sessions::Sessions;
+use crate::ytdl::Links;
 use coomwall_engine::cache::{DimCache, DimRecord};
 use coomwall_engine::layout::{self, Params, Placed, Plan, Rect, Tree};
 use coomwall_engine::scan::{self, ScanReport};
@@ -26,6 +28,10 @@ pub struct AppState {
     pub gpu: GpuInfo,
     /// the `color` setting this launch started with: "direct" or "managed"
     pub color: String,
+    /// saved walls (sessions.json beside settings.json)
+    pub sessions: Sessions,
+    /// links downloaded with yt-dlp (Stack mode)
+    pub links: Links,
 }
 
 impl AppState {
@@ -53,6 +59,8 @@ impl AppState {
             hidden_path,
             gpu,
             color,
+            sessions: Sessions::new(config.join("sessions.json")),
+            links: Links::new(&cache_dir),
         })
     }
 }
@@ -165,9 +173,10 @@ pub async fn plan_reflow(
     Ok(layout::reflow(&tree, bounds, leaf, aspect, &media, &params))
 }
 
-/// Centre mode: `center` in the middle of the wall, `items` around it. `prev`
-/// holds the rectangles of tiles already on screen, so a re-layout keeps
-/// them near where they are.
+/// An item in the centre (Mosaic, Dynamic): `center` in the middle of the
+/// wall, `items` around it. `prev` holds the rectangles of tiles already on
+/// screen, so a re-layout keeps them near where they are. `at` holds the
+/// centre where it is (Dynamic's changes).
 #[tauri::command]
 pub async fn plan_center(
     center: Item,
@@ -176,9 +185,10 @@ pub async fn plan_center(
     bounds: Rect,
     prev: Option<HashMap<u32, Rect>>,
     params: Params,
+    at: Option<Rect>,
 ) -> Result<Option<Plan>, String> {
     let items: Vec<(u32, f64)> = items.into_iter().map(|i| (i.id, i.aspect)).collect();
-    Ok(layout::arrange_center((center.id, center.aspect), share, &items, bounds, &prev.unwrap_or_default(), &params))
+    Ok(layout::arrange_center_at((center.id, center.aspect), share, at, &items, bounds, &prev.unwrap_or_default(), &params))
 }
 
 /// The same tree on a new screen size (window resize, other monitor).

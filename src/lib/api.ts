@@ -1,5 +1,6 @@
 // Typed wrappers over the Rust commands in src-tauri/src/commands.rs.
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import type { Session, SessionInfo, WallSnapshot } from "./session";
 
 export type Kind = "image" | "video";
 
@@ -116,8 +117,8 @@ export const api = {
     invoke<Plan | null>("plan_retile", a),
   planReflow: (a: { tree: Tree; bounds: Rect; leaf: number; aspect: number; media: MediaMap; params: Params }) =>
     invoke<Plan | null>("plan_reflow", a),
-  /** Centre mode: `center` in the middle, `items` around it; `prev` = where tiles are now */
-  planCenter: (a: { center: { id: number; aspect: number }; share: number; items: { id: number; aspect: number }[]; bounds: Rect; prev: Record<number, Rect> | null; params: Params }) =>
+  /** An item in the center (Mosaic, Dynamic): `center` in the middle, `items` around it; `prev` = where tiles are now */
+  planCenter: (a: { center: { id: number; aspect: number }; share: number; items: { id: number; aspect: number }[]; bounds: Rect; prev: Record<number, Rect> | null; params: Params; at?: Rect | null }) =>
     invoke<Plan | null>("plan_center", a),
   planLayout: (tree: Tree, bounds: Rect) => invoke<Placed[]>("plan_layout", { tree, bounds }),
 
@@ -138,7 +139,21 @@ export const api = {
   hideItem: (path: string) => invoke<number>("hide_item", { path }),
   unhideItems: (paths: string[]) => invoke<number>("unhide_items", { paths }),
   gpuInfo: () => invoke<GpuInfo>("gpu_info"),
-  /** the colour setting this launch started with */
+  /** the color setting this launch started with */
   launchColor: () => invoke<"direct" | "managed">("launch_color"),
   restart: () => invoke<void>("restart"),
+
+  // saved walls (src-tauri/src/sessions.rs); `name` null is the `last` session
+  listSessions: () => invoke<{ last: SessionInfo | null; named: SessionInfo[] }>("list_sessions"),
+  getSession: (name: string | null) => invoke<Session | null>("get_session", { name }),
+  /** one wall's snapshot into a session; the first with a new `run` replaces the session */
+  putSessionWall: (a: { name: string | null; run: number; header: { multi: boolean; sources: string[]; recursive: boolean }; monitor: string; wall: WallSnapshot }) =>
+    invoke<void>("put_session_wall", a),
+  deleteSession: (name: string) => invoke<void>("delete_session", { name }),
+  /** the next walls resume session `name`: pairs of [saved display, the key the wall asks with]; [] clears it */
+  setResume: (name: string | null, walls: [string, string][], note = "") => invoke<number>("set_resume", { name, walls, note }),
+  /** a starting wall's snapshot to resume, once */
+  takeResume: (monitor: string) => invoke<WallSnapshot | null>("take_resume", { monitor }),
+  /** where links downloaded with yt-dlp are kept */
+  linksDir: () => invoke<string>("links_dir"),
 };

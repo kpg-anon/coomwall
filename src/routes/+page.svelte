@@ -9,10 +9,14 @@
   import { library } from "$lib/library.svelte";
   import { api } from "$lib/api";
   import { wallMonitor } from "$lib/walls";
+  import { installAppFeel } from "$lib/appfeel";
+  import { installTooltips } from "$lib/tooltip";
 
   let phase = $state<"setup" | "wall" | "loading">(wallMonitor ? "loading" : "setup");
 
   onMount(() => {
+    const feel = installAppFeel();
+    const tips = installTooltips();
     let unlisten: (() => void) | undefined;
     let alive = true;
     (async () => {
@@ -48,6 +52,8 @@
     })();
     return () => {
       alive = false;
+      feel();
+      tips();
       unlisten?.();
     };
   });

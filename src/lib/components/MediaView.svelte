@@ -7,6 +7,10 @@
   interface Props {
     media: Media;
     fit?: "cover" | "contain";
+    /** object-position in percent; centered when absent */
+    position?: { x: number; y: number };
+    /** zoomed in this far (1: not zoomed), about the same point as `position` */
+    zoom?: number;
     muted?: boolean;
     volume?: number;
     rate?: number;
@@ -22,6 +26,8 @@
   let {
     media,
     fit = "cover",
+    position,
+    zoom = 1,
     muted = true,
     volume = 0.6,
     rate = 1,
@@ -32,7 +38,23 @@
     onended,
   }: Props = $props();
 
+  const objectPosition = $derived(position ? `${position.x}% ${position.y}%` : undefined);
+  // Scaling about the point object-position lines up (x% of the item on x%
+  // of the box) keeps that point still, so the zoomed item still covers the
+  // box for any position from 0 to 100%: the item's edge moves to
+  // (T - z*M) * x%, which is <= 0 whenever z*M >= T.
+  const transform = $derived(zoom > 1.001 ? `scale(${zoom})` : undefined);
+  const origin = $derived(zoom > 1.001 ? (objectPosition ?? "50% 50%") : undefined);
+
   let video = $state<HTMLVideoElement>();
+  let image = $state<HTMLImageElement>();
+  /** a streamed link's separate sound (media.audioUrl), kept in step with the video */
+  let audio = $state<HTMLAudioElement>();
+
+  /** the <video> or <img>, for Stack to draw its panes from */
+  export function element(): HTMLVideoElement | HTMLImageElement | undefined {
+    return video ?? image;
+  }
   let played = 0;
   let lastTime = 0;
   let readyFired = false;
@@ -53,20 +75,48 @@
 
   $effect(() => {
     if (!video) return;
-    video.muted = muted;
+    // with a separate sound stream the video itself stays silent
+    video.muted = muted || !!audio;
     video.volume = Math.max(0, Math.min(1, volume));
+    if (audio) {
+      audio.muted = muted;
+      audio.volume = Math.max(0, Math.min(1, volume));
+    }
   });
 
   $effect(() => {
     if (!video) return;
     video.defaultPlaybackRate = rate;
     video.playbackRate = rate;
+    if (audio) {
+      audio.defaultPlaybackRate = rate;
+      audio.playbackRate = rate;
+    }
   });
 
   $effect(() => {
     if (!video) return;
     if (paused) video.pause();
     else video.play().catch(() => {});
+  });
+
+  /** the sound follows the picture: playing, paused, and within 0.3 s */
+  function follow() {
+    if (!audio || !video) return;
+    if (Math.abs(audio.currentTime - video.currentTime) > 0.3) audio.currentTime = video.currentTime;
+    if (video.paused || video.readyState < 3) {
+      if (!audio.paused) audio.pause();
+    } else if (audio.paused) audio.play().catch(() => {});
+  }
+
+  $effect(() => {
+    const a = audio;
+    return () => {
+      if (!a) return;
+      a.pause();
+      a.removeAttribute("src");
+      a.load();
+    };
   });
 
   // Release the decoder when the element goes away. Without this, a long
@@ -89,7 +139,18 @@
     setTimeout(ready, 1200);
   }
 
+  /** a resumed video carries on where it was saved (not at its very end) */
+  function meta() {
+    const v = video!;
+    const at = media.start ?? 0;
+    if (at > 0 && Number.isFinite(v.duration) && at < v.duration - 0.25) {
+      v.currentTime = at;
+      lastTime = at;
+    }
+  }
+
   function time() {
+    follow();
     const t = video!.currentTime;
     const d = t - lastTime;
     if (d > 0 && d < 2) played += d;
@@ -113,7 +174,7 @@
 </script>
 
 {#if media.kind === "image"}
-  <img src={media.url} alt="" draggable="false" decoding="async" data-key={media.key} style:object-fit={fit} onload={ready} onerror={failed} />
+  <img bind:this={image} src={media.url} alt="" draggable="false" decoding="async" data-key={media.key} style:object-fit={fit} style:object-position={objectPosition} style:transform={transform} style:transform-origin={origin} onload={ready} onerror={failed} />
 {:else}
   <video
     bind:this={video}
@@ -126,11 +187,23 @@
     preload="auto"
     {loop}
     style:object-fit={fit}
+    style:object-position={objectPosition}
+    style:transform={transform}
+    style:transform-origin={origin}
+    onloadedmetadata={meta}
     onloadeddata={loaded}
     ontimeupdate={time}
     onended={ended}
     onerror={failed}
+    onplay={follow}
+    onpause={follow}
+    onseeked={follow}
+    onwaiting={follow}
+    onplaying={follow}
   ></video>
+  {#if media.audioUrl}
+    <audio bind:this={audio} src={media.audioUrl} preload="auto" {loop}></audio>
+  {/if}
 {/if}
 
 <style>

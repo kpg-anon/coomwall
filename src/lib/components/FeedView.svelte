@@ -8,13 +8,14 @@
     ctl: FeedController;
     s: Settings;
     paused: boolean;
-    audioKey: number | null;
+    /** keys of the items with sound */
+    sounding: ReadonlyMap<number, string>;
     hudVisible: boolean;
     onhover: (m: Media | null) => void;
     onopen: (m: Media) => void;
   }
 
-  let { ctl, s, paused, audioKey, hudVisible, onhover, onopen }: Props = $props();
+  let { ctl, s, paused, sounding, hudVisible, onhover, onopen }: Props = $props();
 
   let hoverKey = $state<number | null>(null);
 
@@ -33,8 +34,8 @@
 
   function laneStyle(lane: Lane): string {
     return ctl.axis === "x"
-      ? `top:${lane.start}px;height:${lane.cross}px;left:0;right:0`
-      : `left:${lane.start}px;width:${lane.cross}px;top:0;bottom:0`;
+      ? `top:${lane.start}px;height:${lane.cross}px;left:${lane.from}px;width:${lane.span}px`
+      : `left:${lane.start}px;width:${lane.cross}px;top:${lane.from}px;height:${lane.span}px`;
   }
 </script>
 
@@ -55,7 +56,7 @@
             cross={lane.cross}
             gap={s.gap}
             {paused}
-            unmuted={audioKey === item.media.key || (s.audioFollowsMouse && hoverKey === item.media.key)}
+            unmuted={sounding.has(item.media.key) || (s.audioFollowsMouse && hoverKey === item.media.key)}
             volume={s.volume / 100}
             rate={s.rate}
             ring={hudVisible && hoverKey === item.media.key}
@@ -81,9 +82,10 @@
     inset: 0;
     overflow: hidden;
   }
+  /* a lane beside the center item ends at its edge */
   .lane {
     position: absolute;
-    overflow: visible;
+    overflow: hidden;
   }
   .strip {
     position: absolute;

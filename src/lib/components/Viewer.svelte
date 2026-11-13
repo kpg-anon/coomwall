@@ -40,7 +40,10 @@
   let now = $state(0);
   let length = $state(0);
   let scrubbing = $state(false);
-  /** quarter turns clockwise */
+  /** quarter turns clockwise, counted without wrapping: the CSS transition
+   * runs from the old angle to the new one, so 270° to 0° would spin back
+   * three quarters. Counting on (270° to 360°) keeps every turn one quarter
+   * forward. */
   let turns = $state(0);
   let flipped = $state(false);
   /** shown in the bar; the live value is `z` */
@@ -55,7 +58,9 @@
   let clickTimer: ReturnType<typeof setTimeout> | undefined;
 
   const isVideo = $derived(media.kind === "video");
-  const sideways = $derived(turns % 2 === 1);
+  /** the bars are up; a paused or scrubbed video keeps them up */
+  const bars = $derived(chrome || scrubbing || !playing);
+  const sideways = $derived(turns % 2 !== 0);
   // the size at which the whole item fits the stage, turned or not
   const fit = $derived.by(() => {
     const [w, h] = sideways ? [media.h, media.w] : [media.w, media.h];
@@ -101,7 +106,7 @@
     apply(animate);
   }
 
-  function centre(): [number, number] {
+  function middle(): [number, number] {
     const r = stage!.getBoundingClientRect();
     return [r.left + r.width / 2, r.top + r.height / 2];
   }
@@ -170,7 +175,7 @@
   }
 
   function turn() {
-    turns = (turns + 1) % 4;
+    turns += 1;
     reset(false);
   }
 
@@ -188,12 +193,12 @@
       if (video?.paused) seekBy(-frame);
     } else if (k === "." || k === ">") {
       if (video?.paused) seekBy(frame);
-    } else if (k === "+" || k === "=") zoomAt(z * 1.25, ...centre(), true);
-    else if (k === "-" || k === "_") zoomAt(z / 1.25, ...centre(), true);
+    } else if (k === "+" || k === "=") zoomAt(z * 1.25, ...middle(), true);
+    else if (k === "-" || k === "_") zoomAt(z / 1.25, ...middle(), true);
     else if (k === "0") reset();
     else if (lower === "z") {
       if (z > 1.001) reset();
-      else zoomAt(actual(), ...centre(), true);
+      else zoomAt(actual(), ...middle(), true);
     } else if (lower === "r") turn();
     else if (lower === "x") flipped = !flipped;
     else return false;
@@ -275,7 +280,7 @@
   }
 </script>
 
-<div class="viewer" role="presentation">
+<div class="viewer" class:bare={!bars} role="presentation">
   <div class="stage" bind:this={stage} bind:clientWidth={sw} bind:clientHeight={sh} onclick={(e) => e.target === stage && onclose()} role="presentation">
     <div
       class="xf"
@@ -311,7 +316,7 @@
     </div>
   </div>
 
-  <div class="chrome" class:on={chrome || scrubbing || !playing}>
+  <div class="chrome" class:on={bars}>
     <div class="top">
       <span class="name" title={media.path}>{media.name}</span>
       <span class="dim">{media.w}×{media.h}</span>
@@ -364,7 +369,15 @@
       <span><kbd>drag</kbd> pan</span>
       <span><kbd>Z</kbd> actual size</span>
       <span><kbd>0</kbd> fit</span>
-      {#if isVideo}<span><kbd>←</kbd><kbd>→</kbd> 5 s</span><span><kbd>,</kbd><kbd>.</kbd> frame</span>{/if}
+      <span><kbd>R</kbd> turn</span>
+      <span><kbd>X</kbd> mirror</span>
+      {#if isVideo}
+        <span><kbd>Space</kbd> play</span>
+        <span><kbd>←</kbd><kbd>→</kbd> 5 s</span>
+        <span><kbd>,</kbd><kbd>.</kbd> frame</span>
+        <span><kbd>[</kbd><kbd>]</kbd> speed</span>
+        <span><kbd>M</kbd> sound</span>
+      {/if}
       <span><kbd>Esc</kbd> close</span>
     </div>
   </div>
@@ -375,9 +388,19 @@
     position: absolute;
     inset: 0;
     z-index: 30;
-    /* neutral black: the item is judged against no colour of the theme */
+    /* neutral black: the item is judged against no color of the theme */
     background: rgba(0, 0, 0, 0.9);
     animation: in 180ms ease both;
+    /* shown while the bars are up, even when the wall's own timer has
+       hidden it (a paused video keeps the bars up) */
+    cursor: default;
+  }
+  /* Hidden exactly while the bars are, over the item and the background.
+     Only while the wall allows hiding (not with help or a menu open).
+     !important beats .xf's grab cursor and the inline one set by a drag. */
+  :global(.wall.hide-cursor) .viewer.bare,
+  :global(.wall.hide-cursor) .viewer.bare * {
+    cursor: none !important;
   }
   @keyframes in {
     from { opacity: 0; }
@@ -434,8 +457,10 @@
     font-size: 12px;
     color: var(--text-secondary);
   }
+  /* the three bars look the same: same panel, same opacity, no blur */
   .top,
-  .bar {
+  .bar,
+  .keys {
     padding: 6px 10px;
     border-radius: 9px;
     background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
@@ -466,14 +491,15 @@
   }
   .bar {
     left: 50%;
-    bottom: 44px;
+    /* above the keys bar */
+    bottom: 58px;
     transform: translateX(-50%);
     width: min(760px, calc(100% - 24px));
   }
   .keys {
-    left: 0;
-    right: 0;
-    bottom: 14px;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
     justify-content: center;
     gap: 16px;
     font-family: var(--sans);

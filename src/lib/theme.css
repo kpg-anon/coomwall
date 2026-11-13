@@ -142,7 +142,14 @@ html, body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
   overflow: hidden;
+  cursor: default;
 }
+
+/* an app, not a page: only text fields select text; images and links do not
+   drag out; nothing gets a browser focus ring (Tab is off, see appfeel.ts) */
+input:not([type]), input[type="text"], textarea { user-select: text; cursor: text; }
+img, a { -webkit-user-drag: none; }
+:focus { outline: none; }
 
 kbd {
   font-family: var(--mono);
@@ -166,4 +173,29 @@ button:focus, [tabindex]:focus, input:focus { outline: none; }
 button:focus-visible, [tabindex]:focus-visible, input:focus-visible {
   outline: 2px solid var(--purple);
   outline-offset: 1px;
+}
+
+/* hover text (src/lib/tooltip.ts), in place of the native tooltip */
+.cw-tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  max-width: 320px;
+  padding: 8px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 96%, var(--purple));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.cw-tip.on {
+  opacity: 1;
 }

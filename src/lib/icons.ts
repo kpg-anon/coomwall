@@ -1,5 +1,7 @@
 // Nerd Font glyphs (FontAwesome codepoints in the bundled symbols font),
 // rendered with the `.nf` class from theme.css.
+import type { Mode } from "./settings.svelte";
+
 export const I = {
   folder: "",
   folderOpen: "",
@@ -41,4 +43,13 @@ export const I = {
   flip: "\uf0ec",
   compress: "\uf066",
   layers: "\uf24d",
+  undo: "\uf0e2",
+  stepBackward: "\uf048",
+  stepForward: "\uf051",
+  save: "\uf0c7",
+  history: "\uf1da",
+  trash: "\uf1f8",
 } as const;
+
+/** each mode's icon (setup, HUD, saved walls) */
+export const MODE_ICON: Record<Mode, string> = { mosaic: I.th, ribbon: I.bars, cascade: I.columns, dynamic: I.random, grid: I.thLarge, stack: I.layers };

@@ -8,14 +8,15 @@
     ctl: TileWall;
     s: Settings;
     paused: boolean;
-    audioKey: number | null;
+    /** keys of the items with sound */
+    sounding: ReadonlyMap<number, string>;
     hudVisible: boolean;
     debug: boolean;
     onhover: (m: Media | null) => void;
     onopen: (m: Media) => void;
   }
 
-  let { ctl, s, paused, audioKey, hudVisible, debug, onhover, onopen }: Props = $props();
+  let { ctl, s, paused, sounding, hudVisible, debug, onhover, onopen }: Props = $props();
 
   function enter(t: TileState) {
     ctl.hovered = t.id;
@@ -46,12 +47,11 @@
       {tile}
       gap={s.gap}
       {paused}
-      unmuted={audioKey === tile.media.key || (s.audioFollowsMouse && ctl.hovered === tile.id)}
+      unmuted={sounding.has(tile.media.key) || (s.audioFollowsMouse && ctl.hovered === tile.id)}
       volume={s.volume / 100}
       rate={s.rate}
       imageSeconds={s.imageSeconds}
       minVideo={s.minVideoSeconds}
-      maxVideo={s.maxVideoSeconds}
       ring={hudVisible && ctl.hovered === tile.id}
       watched={s.hoverHold && ctl.hovered === tile.id}
       endless={ctl.dynamic}
@@ -60,6 +60,7 @@
       onenter={enter}
       onleave={leave}
       onopen={(t) => onopen(t.media)}
+      onpan={(id, pan) => ctl.setPan(id, pan)}
     />
   {/each}
 

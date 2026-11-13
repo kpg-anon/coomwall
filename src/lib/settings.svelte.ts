@@ -3,13 +3,28 @@
 // a setting never breaks an existing install.
 import { api } from "./api";
 
-export type Mode = "mosaic" | "ribbon" | "cascade" | "dynamic" | "grid" | "center";
+export type Mode = "mosaic" | "ribbon" | "cascade" | "dynamic" | "grid" | "stack";
+/** Stack: the panes side by side (row) or one above the next (column); auto
+ * takes whichever shows the item larger */
+export type StackDir = "auto" | "row" | "column";
+/** Stack: items from the sources one after another, or one file or link looping */
+export type StackSource = "queue" | "one";
+/** Stack, a page link: play its streams straight from the site, or download it first */
+export type LinkMode = "stream" | "download";
+/** yt-dlp reads this browser's cookies for links that need a login; "" none */
+export type Cookies = "" | "firefox" | "chrome" | "edge" | "brave";
+/** what [ ] do to the playback speed: step through rateList, or move by 0.05 */
+export type RateKeys = "list" | "fine";
+/** how closely an item must fit a Grid cell with "only media that fits":
+ * exact shape, up to 12% cut off, or automatic (exact on a 16:9 screen,
+ * where 16:9 media fits a 3×3 grid exactly; up to 12% on other screens) */
+export type GridFitCrop = "auto" | "exact" | "loose";
 export type TypeFilter = "mixed" | "videos" | "images";
 export type ShapeFilter = "any" | "portrait" | "landscape";
 /** auto: Windows decides (the power-saving GPU for WebView2) */
 export type GpuChoice = "auto" | "high" | "low";
-/** direct: colour values go to the display as they are in the file, as mpv
- * and most viewers do. managed: converted to the display's colour profile. */
+/** direct: color values go to the display as they are in the file, as mpv
+ * and most viewers do. managed: converted to the display's color profile. */
 export type ColorChoice = "direct" | "managed";
 /** Grid: cells merged into one tile, in cell units from the top left */
 export interface GridSpan {
@@ -37,12 +52,31 @@ export interface Settings {
   gridSpans: GridSpan[];
   /** Grid: fill each cell (cropping what does not fit) or show items whole */
   gridFit: "cover" | "contain";
-  /** Centre: the file that plays in the middle; "" until one is chosen */
+  /** Grid: only items whose shape fits the cells (see gridFitCrop) */
+  gridOnlyFits: boolean;
+  /** how close "only media that fits" must be (a preference, shared) */
+  gridFitCrop: GridFitCrop;
+  /** one item plays in the middle of the wall, in any mode. Mosaic and
+   * Dynamic lay their tiles out around it; Ribbon, Cascade and Grid run
+   * behind it. */
+  centered: boolean;
+  /** the file in the middle; "" until one is chosen */
   center: string;
-  /** Centre: its size, as a share of the largest size that fits the wall */
+  /** its size, as a share of the largest size that fits the wall */
   centerSize: number;
-  /** Centre: tiles around it */
-  centerTiles: number;
+  /** Stack: how many copies of the item, side by side */
+  stackPanes: number;
+  stackDir: StackDir;
+  /** Stack: each pane turned this many degrees clockwise (0, 90, 270) */
+  stackTurn: number;
+  /** Stack: each pane filled (cropping), else the item whole */
+  stackFill: boolean;
+  stackSource: StackSource;
+  /** Stack, "one": a file path or a link (yt-dlp) */
+  stackItem: string;
+  stackLinkMode: LinkMode;
+  /** yt-dlp: the browser whose cookies it may read */
+  ytdlCookies: Cookies;
   /** Ribbon: rows */
   rows: number;
   /** Cascade: columns */
@@ -68,11 +102,15 @@ export interface Settings {
   shuffle: boolean;
   /** seconds an image stays up (Mosaic) */
   imageSeconds: number;
-  /** cut videos after this many seconds; 0 plays them to the end (Mosaic) */
+  /** videos longer than this many seconds are skipped, in every mode; 0 = no limit */
   maxVideoSeconds: number;
   /** clips shorter than this loop until it has passed (Mosaic) */
   minVideoSeconds: number;
   rate: number;
+  /** [ ] step through rateList (list) or by 0.05 (fine) */
+  rateKeys: RateKeys;
+  /** the speeds [ ] step through, fastest first */
+  rateList: number[];
   /** 0-100 */
   volume: number;
   /** px between tiles */
@@ -116,9 +154,17 @@ export const LAYOUT_KEYS = [
   "gridRows",
   "gridSpans",
   "gridFit",
+  "gridOnlyFits",
+  "centered",
   "center",
   "centerSize",
-  "centerTiles",
+  "stackPanes",
+  "stackDir",
+  "stackTurn",
+  "stackFill",
+  "stackSource",
+  "stackItem",
+  "stackLinkMode",
   "type",
   "shape",
 ] as const;
@@ -143,9 +189,19 @@ export const DEFAULTS: Settings = {
   gridRows: 1,
   gridSpans: [],
   gridFit: "cover",
+  gridOnlyFits: false,
+  gridFitCrop: "auto",
+  centered: false,
   center: "",
   centerSize: 0.7,
-  centerTiles: 8,
+  stackPanes: 3,
+  stackDir: "auto",
+  stackTurn: 0,
+  stackFill: true,
+  stackSource: "one",
+  stackItem: "",
+  stackLinkMode: "stream",
+  ytdlCookies: "",
   rows: 2,
   columns: 4,
   ribbonDir: "left",
@@ -163,6 +219,8 @@ export const DEFAULTS: Settings = {
   maxVideoSeconds: 0,
   minVideoSeconds: 6,
   rate: 1,
+  rateKeys: "list",
+  rateList: [1, 0.8, 0.5, 0.4],
   volume: 60,
   gap: 4,
   hudSeconds: 2.2,
@@ -184,7 +242,7 @@ export const LIMITS = {
   columns: [1, 10],
   gridCols: [1, 8],
   gridRows: [1, 6],
-  centerTiles: [2, 16],
+  stackPanes: [1, 6],
 } as const;
 
 export type CountKey = keyof typeof LIMITS;
@@ -195,22 +253,74 @@ export const MODE_NAMES: Record<Mode, string> = {
   cascade: "Cascade",
   dynamic: "Dynamic",
   grid: "Grid",
-  center: "Centre",
+  stack: "Stack",
 };
 
+/** Before 1.0 Center was a mode of its own, with its own tile count. It is
+ * now Mosaic with the center on. */
+function migrate(o: any) {
+  if (!o || typeof o !== "object") return;
+  if (o.mode === "center") {
+    o.mode = "mosaic";
+    o.centered = true;
+    if (typeof o.centerTiles === "number") o.tiles = o.centerTiles;
+  }
+  delete o.centerTiles;
+}
+
+/** A speed list as typed in setup: positive numbers, fastest first, no repeats. */
+export function parseRates(text: string): number[] {
+  const out = text
+    .split(/[\s,;]+/)
+    .map((p) => Number(p.replace(/x$/i, "")))
+    .filter((n) => Number.isFinite(n) && n >= 0.1 && n <= 4)
+    .map((n) => Math.round(n * 100) / 100);
+  return [...new Set(out)].sort((a, b) => b - a);
+}
+
+/** The next speed from `rate`: one step slower (dir -1) or faster (+1) in
+ * `list`, round to the other end past the last. */
+export function cycleRate(rate: number, list: number[], dir: 1 | -1): number {
+  if (!list.length) return rate;
+  const asc = [...list].sort((a, b) => a - b);
+  if (dir < 0) {
+    const below = asc.filter((r) => r < rate - 0.001);
+    return below.length ? below[below.length - 1] : asc[asc.length - 1];
+  }
+  const above = asc.filter((r) => r > rate + 0.001);
+  return above.length ? above[0] : asc[0];
+}
+
 class SettingsStore {
-  s = $state<Settings>({ ...DEFAULTS, gridSpans: [], walls: {} });
+  s = $state<Settings>({ ...DEFAULTS, gridSpans: [], rateList: [...DEFAULTS.rateList], walls: {} });
   loaded = $state(false);
   /** in a wall window: the display it fills. Its layout is saved under walls[wall]. */
   private wall: string | null = null;
+  /** in a wall window with its own folders: the shared sources they replaced in `s` */
+  private shared: string[] | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
+
+  /** the shared sources, also in a wall window that plays its own folders */
+  sharedSources(): string[] {
+    return [...(this.shared ?? this.s.sources)];
+  }
+
+  /** this wall plays its display's own folders */
+  get ownSources(): boolean {
+    return this.shared !== null;
+  }
 
   async load() {
     try {
       const v = await api.getSettings();
       // assign into the existing object: components hold `settings.s` from
       // before the load finished, and must keep seeing the live one
-      if (v && typeof v === "object") Object.assign(this.s, { ...DEFAULTS, gridSpans: [], walls: {}, ...(v as Partial<Settings>) });
+      if (v && typeof v === "object") {
+        const o = v as any;
+        migrate(o);
+        for (const w of Object.values(o.walls ?? {})) migrate(w);
+        Object.assign(this.s, { ...DEFAULTS, gridSpans: [], rateList: [...DEFAULTS.rateList], walls: {}, ...(o as Partial<Settings>) });
+      }
     } catch (e) {
       console.warn("settings: could not load", e);
     }
@@ -227,7 +337,10 @@ class SettingsStore {
     for (const k of LAYOUT_KEYS) if (l[k] !== undefined) (this.s as any)[k] = l[k];
     // this display's own folders, if it has any. Not saved back from here:
     // a wall window writes only its layout (see write)
-    if (l.sources?.length) this.s.sources = [...l.sources];
+    if (l.sources?.length) {
+      this.shared = [...this.s.sources];
+      this.s.sources = [...l.sources];
+    }
   }
 
   /** The wall moved to another display (walls.rs swapped the saved layouts). */
@@ -269,7 +382,7 @@ class SettingsStore {
     if (mode === "ribbon") return "rows";
     if (mode === "cascade") return "columns";
     if (mode === "grid") return "gridCols";
-    if (mode === "center") return "centerTiles";
+    if (mode === "stack") return "stackPanes";
     return "tiles";
   }
 }

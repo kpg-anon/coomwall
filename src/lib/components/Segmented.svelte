@@ -1,4 +1,6 @@
-<script lang="ts" generics="T extends string">
+<script lang="ts" generics="T extends string | number | boolean">
+  import { I } from "$lib/icons";
+
   interface Option {
     value: T;
     label: string;
@@ -9,13 +11,26 @@
     value: T;
     options: Option[];
     label?: string;
+    /** the default: a reset button shows beside the label while another is chosen */
+    def?: T;
+    /** tighter buttons, for two groups side by side */
+    compact?: boolean;
+    /** what the setting does, shown on hover */
+    title?: string;
   }
 
-  let { value = $bindable(), options, label }: Props = $props();
+  let { value = $bindable(), options, label, def, compact = false, title }: Props = $props();
 </script>
 
-<div class="seg-wrap">
-  {#if label}<span class="label">{label}</span>{/if}
+<div class="seg-wrap" class:compact>
+  {#if label}
+    <span class="head">
+      <span class="label" class:explained={!!title} {title}>{label}</span>
+      {#if def !== undefined && value !== def}
+        <button class="reset nf" title="Back to the default, {options.find((o) => o.value === def)?.label ?? def}" onclick={() => (value = def)}>{I.undo}</button>
+      {/if}
+    </span>
+  {/if}
   <div class="seg" role="radiogroup">
     {#each options as o (o.value)}
       <button class:on={value === o.value} role="radio" aria-checked={value === o.value} onclick={() => (value = o.value)}>
@@ -32,6 +47,30 @@
     flex-direction: column;
     gap: 6px;
   }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 15px;
+  }
+  .seg-wrap .reset {
+    flex: none;
+    padding: 0 3px;
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .seg-wrap .reset:hover {
+    color: var(--purple);
+  }
+  /* a dotted underline: hover for what it does */
+  .label.explained {
+    text-decoration: underline dotted color-mix(in srgb, var(--text-muted) 70%, transparent);
+    text-underline-offset: 3px;
+  }
   .label {
     color: var(--text-secondary);
     font-weight: 600;
@@ -45,7 +84,7 @@
     background: var(--bg-chip);
     border: 1px solid var(--border);
   }
-  button {
+  .seg button {
     flex: 1;
     display: inline-flex;
     align-items: center;
@@ -61,10 +100,13 @@
     cursor: pointer;
     white-space: nowrap;
   }
-  button:hover {
+  .compact .seg button {
+    padding: 5px 9px;
+  }
+  .seg button:hover {
     color: var(--text-primary);
   }
-  button.on {
+  .seg button.on {
     background: var(--bg-selected-active);
     color: var(--text-primary);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--purple) 45%, transparent);

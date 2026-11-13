@@ -1537,6 +1537,24 @@ pub fn arrange_center(
     prev: &HashMap<u32, Rect>,
     p: &Params,
 ) -> Option<Plan> {
+    arrange_center_at(center, share, None, items, bounds, prev, p)
+}
+
+/// [`arrange_center`] with the centre held where it is: with `at`, only
+/// that rectangle is tried for the centre, and the search is over how the
+/// items share the strips around it. Dynamic uses it on every change, so the
+/// centre item never changes size or place while the wall around it does.
+/// When no layout fits around `at` (one item, say), the centre is placed
+/// afresh as without it.
+pub fn arrange_center_at(
+    center: (u32, f64),
+    share: f64,
+    at: Option<Rect>,
+    items: &[(u32, f64)],
+    bounds: Rect,
+    prev: &HashMap<u32, Rect>,
+    p: &Params,
+) -> Option<Plan> {
     let started = std::time::Instant::now();
     let n = items.len();
     let aspect = clamp_aspect(center.1);
@@ -1564,10 +1582,18 @@ pub fn arrange_center(
     let share = share.clamp(0.25, 1.0);
     let mut solver = CenterSolver { center: (center.0, aspect), wanted_area: fit * share * share, items, bounds, prev, media: media.clone(), base, solved: HashMap::new() };
     let mut tries: Vec<CenterTry> = Vec::new();
-    for c in center_candidates(aspect, share, bounds, n) {
+    let seed = |solver: &mut CenterSolver, tries: &mut Vec<CenterTry>, c: Rect| {
         let both = c.x - bounds.x > 0.5 && c.y - bounds.y > 0.5;
         for sides_full in if both { vec![true, false] } else { vec![true] } {
             tries.extend(solver.seed(c, sides_full));
+        }
+    };
+    if let Some(c) = at {
+        seed(&mut solver, &mut tries, c);
+    }
+    if tries.is_empty() {
+        for c in center_candidates(aspect, share, bounds, n) {
+            seed(&mut solver, &mut tries, c);
         }
     }
     tries.sort_by(|a, b| a.cost.total_cmp(&b.cost));
@@ -1956,6 +1982,23 @@ mod tests {
         let tight = arrange_center((99, 16.0 / 9.0), 0.95, &items, SCREEN, &HashMap::new(), &Params::default()).unwrap();
         assert_eq!(tight.rects.len(), 7);
         assert!(rect_map(&tight)[&99].area() < SCREEN.area() * 0.9);
+    }
+
+    #[test]
+    fn a_center_held_at_its_rect_stays_there() {
+        let mut rng = Rng(7);
+        for n in [3usize, 6, 9, 14] {
+            let items: Vec<(u32, f64)> = (1..=n as u32).map(|id| (id, 0.5 + rng.next() * 1.5)).collect();
+            let first = arrange_center((99, 9.0 / 16.0), 0.6, &items, SCREEN, &HashMap::new(), &Params::default()).unwrap();
+            let at = rect_map(&first)[&99];
+            // new shapes around it, as Dynamic gives on every change
+            let next: Vec<(u32, f64)> = items.iter().map(|&(id, _)| (id, 0.5 + rng.next() * 1.5)).collect();
+            let plan = arrange_center_at((99, 9.0 / 16.0), 0.6, Some(at), &next, SCREEN, &rect_map(&first), &Params::default()).unwrap();
+            let r = rect_map(&plan);
+            assert_eq!(r[&99], at, "{n} around");
+            let area: f64 = plan.rects.iter().map(|p| p.rect.area()).sum();
+            assert!((area - SCREEN.area()).abs() < 1.0, "{n} around: covers {area} of {}", SCREEN.area());
+        }
     }
 
     #[test]

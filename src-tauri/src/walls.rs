@@ -36,6 +36,9 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
     let cursor = app.cursor_position().ok();
     let mut focus = None;
     let mut opened = 0;
+    // one number for this start of the walls: their saves into the `last`
+    // session join each other and replace the one before (sessions.rs)
+    let run = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     for name in &monitors {
         let Some(m) = all.iter().find(|m| m.name().is_some_and(|n| n == name)) else {
             continue;
@@ -53,7 +56,7 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
         cfg.min_height = None;
         let mut builder = tauri::WebviewWindowBuilder::from_config(&app, &cfg)
             .map_err(err)?
-            .initialization_script(format!("window.__CW_WALL__ = {};", serde_json::to_string(name).map_err(err)?));
+            .initialization_script(format!("window.__CW_WALL__ = {}; window.__CW_RUN__ = {run};", serde_json::to_string(name).map_err(err)?));
         if let Some(dir) = &template.data_dir {
             builder = builder.data_directory(dir.clone());
         }
@@ -132,6 +135,9 @@ pub async fn move_wall(app: AppHandle, state: State<'_, AppState>, window: Webvi
     }
     if window.label().starts_with(PREFIX) {
         swap_wall_layouts(&state, &here, &there)?;
+        // the saved session is keyed by display as well; a resume must put
+        // each wall where it is now
+        state.sessions.swap_last(&here, &there)?;
     }
     let _ = window.set_focus();
     // to everyone, with the label: a JS listen() hears events emitted to any
@@ -153,13 +159,28 @@ pub fn focus_wall(app: AppHandle, window: WebviewWindow) -> bool {
 }
 
 /// Esc on any wall: close them all. The last one to go brings setup back.
+/// `close` asks first: each wall's page saves its session snapshot when asked
+/// (onCloseRequested in Wall.svelte) and then closes itself. A page that does
+/// not answer in time (hung) is closed without it.
 #[tauri::command]
 pub fn close_walls(app: AppHandle) {
+    let mut asked = Vec::new();
     for (label, w) in app.webview_windows() {
         if label.starts_with(PREFIX) {
             let _ = w.close();
+            asked.push(label);
         }
     }
+    // only these windows: labels are never reused, and walls started again
+    // from setup in the meantime are new ones
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(4000));
+        for label in asked {
+            if let Some(w) = app.get_webview_window(&label) {
+                let _ = w.destroy();
+            }
+        }
+    });
 }
 
 /// Called for every window event (lib.rs). A wall closing with Alt+F4 also

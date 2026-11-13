@@ -6,6 +6,7 @@
   import MediaView from "./MediaView.svelte";
   import type { FeedItem } from "$lib/feed.svelte";
   import type { Media } from "$lib/queue.svelte";
+  import { I } from "$lib/icons";
 
   interface Props {
     item: FeedItem;
@@ -77,6 +78,8 @@
       onready={() => (shown = true)}
     />
   {/if}
+  <!-- inside the item, so it travels with the lane's transform and is clipped to the item -->
+  {#if unmuted && item.media.kind === "video"}<span class="badge nf">{I.volume}</span>{/if}
 </div>
 
 <style>
@@ -104,5 +107,16 @@
   }
   .item.ring::after {
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--purple) 70%, transparent);
+  }
+  .badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-size: 12px;
+    color: var(--cyan);
+    background: color-mix(in srgb, var(--bg-app) 70%, transparent);
+    border-radius: var(--radius-sm);
+    padding: 4px 5px;
+    pointer-events: none;
   }
 </style>

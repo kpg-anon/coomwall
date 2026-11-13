@@ -26,7 +26,7 @@
 
   const tiles = $derived(gridTiles(cols, rows, spans ?? []));
   const merged = $derived(validSpans(cols, rows, spans ?? []).length);
-  const height = $derived(Math.round(Math.min(CANVAS / Math.max(0.4, aspect), 190)));
+  const height = $derived(Math.round(Math.min(CANVAS / Math.max(0.4, aspect), 150)));
   const width = $derived(Math.round(Math.min(CANVAS, height * aspect)));
   /** the block being dragged out, in cells */
   const drag = $derived(
@@ -98,7 +98,7 @@
       {/if}
     </div>
     <span class="hint">
-      Drag across cells to merge them into one tile. Click a merged tile to split it.
+      Drag across cells to merge them; click a merged tile to split it.
       {#if merged}<button class="link" onclick={() => (spans = [])}>Clear merges</button>{/if}
     </span>
   </div>
@@ -123,11 +123,12 @@
       />
     </div>
     <div class="nums">
-      <Range label="Columns" bind:value={cols} min={LIMITS.gridCols[0]} max={LIMITS.gridCols[1]} />
-      <Range label="Rows" bind:value={rows} min={LIMITS.gridRows[0]} max={LIMITS.gridRows[1]} />
+      <Range label="Columns" title="Columns of equal cells. + − on the wall." bind:value={cols} min={LIMITS.gridCols[0]} max={LIMITS.gridCols[1]} />
+      <Range label="Rows" title="Rows of equal cells. ↑ ↓ on the wall." bind:value={rows} min={LIMITS.gridRows[0]} max={LIMITS.gridRows[1]} />
     </div>
     <Segmented
       label="Each item"
+      title="Fills its tile: the item is cropped to fill the cell. Shown whole: the whole item, with dark bars where its shape differs from the cell."
       bind:value={fit}
       options={[
         { value: "cover", label: "Fills its tile" },

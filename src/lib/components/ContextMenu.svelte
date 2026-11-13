@@ -6,20 +6,24 @@
   import { isUrl } from "$lib/api";
   import type { Media } from "$lib/queue.svelte";
   import { I } from "$lib/icons";
+  import CenterIcon from "./CenterIcon.svelte";
 
-  export type MenuAction = "reveal" | "open" | "center" | "remove" | "hide";
+  export type MenuAction = "reveal" | "open" | "center" | "uncenter" | "prev" | "next" | "stack" | "remove" | "hide";
 
   interface Props {
     media: Media;
     x: number;
     y: number;
-    /** this item is Centre mode's middle item already */
+    /** this item is in the center now */
     centered?: boolean;
+    /** it is in a tile of Mosaic, Dynamic or Grid, which can go back and
+     * forward; `back`: the tile has an earlier item. Null otherwise. */
+    steps?: { back: boolean } | null;
     onaction: (a: MenuAction) => void;
     onclose: () => void;
   }
 
-  let { media, x, y, centered = false, onaction, onclose }: Props = $props();
+  let { media, x, y, centered = false, steps = null, onaction, onclose }: Props = $props();
 
   let el = $state<HTMLDivElement>();
   let w = $state(0);
@@ -68,9 +72,27 @@
   <button role="menuitem" onclick={() => pick("open")}>
     <span class="nf">{I.external}</span>Open in default app
   </button>
-  <button role="menuitem" disabled={centered} onclick={() => pick("center")}>
-    <span class="nf">{I.bullseye}</span>Play in the centre<kbd>C</kbd>
+  {#if centered}
+    <button role="menuitem" onclick={() => pick("uncenter")}>
+      <span class="ci"><CenterIcon /></span>Stop centering it<kbd>C</kbd>
+    </button>
+  {:else}
+    <button role="menuitem" onclick={() => pick("center")}>
+      <span class="ci"><CenterIcon /></span>Make it the centered media<kbd>C</kbd>
+    </button>
+  {/if}
+  <button role="menuitem" onclick={() => pick("stack")}>
+    <span class="nf">{I.layers}</span>Stack it<span class="note">copies side by side</span>
   </button>
+  {#if steps}
+    <hr />
+    <button role="menuitem" disabled={!steps.back} onclick={() => pick("prev")}>
+      <span class="nf">{I.stepBackward}</span>Previous item<kbd>B</kbd>
+    </button>
+    <button role="menuitem" onclick={() => pick("next")}>
+      <span class="nf">{I.stepForward}</span>Next item<kbd>N</kbd>
+    </button>
+  {/if}
   <hr />
   <button role="menuitem" onclick={() => pick("remove")}>
     <span class="nf">{I.eyeSlash}</span>Remove from wall<span class="note">until you go back to setup</span>
@@ -143,6 +165,13 @@
   button:disabled {
     color: var(--text-muted);
     cursor: default;
+  }
+  button .ci {
+    display: inline-flex;
+    width: 14px;
+    justify-content: center;
+    color: var(--purple);
+    font-size: 12px;
   }
   button .nf {
     width: 14px;

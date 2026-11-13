@@ -2,9 +2,11 @@
   // Shown only while the pointer moves (or a key is pressed); the wall itself
   // has no interface. Top: what is playing and what is under the pointer.
   // Bottom: the keys, like comfysort's bottom bar.
-  import { I } from "$lib/icons";
+  import { I, MODE_ICON } from "$lib/icons";
   import type { Media } from "$lib/queue.svelte";
-  import { MODE_NAMES, type Mode } from "$lib/settings.svelte";
+  import { MODE_NAMES, settings, type Mode } from "$lib/settings.svelte";
+  import { wallKeys } from "$lib/keys";
+  import CenterIcon from "./CenterIcon.svelte";
 
   interface Props {
     visible: boolean;
@@ -16,6 +18,8 @@
     countLabel: string;
     /** the mode's own numbers: direction and speed, grid size, ... */
     detail: string;
+    /** the center item, when the center is on: its size and name */
+    center?: string;
     paused: boolean;
     onTop: boolean;
     rate: number;
@@ -33,7 +37,6 @@
 
   let p: Props = $props();
 
-  const MODE_ICON: Record<Mode, string> = { mosaic: I.th, ribbon: I.bars, cascade: I.columns, dynamic: I.random, grid: I.thLarge, center: I.bullseye };
 
   function ext(name: string): string {
     const i = name.lastIndexOf(".");
@@ -43,12 +46,13 @@
   const KEYS: [string, string][] = [
     ["Space", "pause"],
     ["+ −", "count"],
-    ["1–6", "mode"],
+    ["1–5", "mode"],
     ["N", "next"],
     ["P", "pin"],
     ["M", "sound"],
     ["F", "view"],
-    ["C", "centre"],
+    ["C", "center"],
+    ["[ ]", "speed"],
     ["R", "retile"],
     ["?", "keys"],
     ["Esc", "back"],
@@ -63,6 +67,7 @@
       <span class="chip mode"><span class="nf">{MODE_ICON[p.mode]}</span>{MODE_NAMES[p.mode]}</span>
       {#if p.countLabel}<span class="chip">{p.count} {p.countLabel}</span>{/if}
       {#if p.detail}<span class="chip detail">{p.detail}</span>{/if}
+      {#if p.center}<span class="chip detail" title="Centered media (C on it stops centering, Shift+↑↓ its size)"><span class="ci"><CenterIcon /></span>{p.center}</span>{/if}
       {#if p.rate !== 1}<span class="chip">{p.rate.toFixed(2)}×</span>{/if}
       {#if p.onTop}<span class="chip" title="Above every other window (T)"><span class="nf">{I.layers}</span>on top</span>{/if}
       {#if p.paused}<span class="chip warn"><span class="nf">{I.pause}</span>paused</span>{/if}
@@ -101,24 +106,12 @@
     <div class="help">
       <h2><span class="nf">{I.keyboard}</span> Keys</h2>
       <dl>
-        <dt><kbd>Space</kbd></dt><dd>pause or resume this wall · with <kbd>Shift</kbd>, every wall</dd>
-        <dt><kbd>1</kbd>–<kbd>6</kbd></dt><dd>Mosaic · Ribbon · Cascade · Dynamic · Grid · Centre, without leaving the wall</dd>
-        <dt><kbd>+</kbd> <kbd>−</kbd></dt><dd>one more or one fewer tile, row or column</dd>
-        <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>feed speed · Dynamic: how often · Grid: rows · Centre: its size</dd>
-        <dt><kbd>D</kbd></dt><dd>reverse the feed's direction</dd>
-        <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>playback speed by 5% · with <kbd>Shift</kbd>, by 25%</dd>
-        <dt><kbd>N</kbd></dt><dd>next item in the tile under the pointer</dd>
-        <dt><kbd>P</kbd></dt><dd>pin it: it keeps playing and nothing moves it</dd>
-        <dt><kbd>M</kbd></dt><dd>sound on for the item under the pointer</dd>
-        <dt><kbd>F</kbd> / double-click</dt><dd>view it whole: wheel to zoom, drag to pan</dd>
-        <dt><kbd>C</kbd></dt><dd>play it in the centre, with the other tiles around it</dd>
-        <dt><kbd>O</kbd></dt><dd>show the file in Explorer</dd>
-        <dt>right-click</dt><dd>show in Explorer, open in the default app, play in the centre, remove from the wall, never show again</dd>
-        <dt><kbd>T</kbd></dt><dd>keep the walls above every other window, or stop</dd>
-        <dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></dt><dd>move this wall to the display on that side; a wall there swaps with it</dd>
-        <dt><kbd>R</kbd></dt><dd>lay the wall out again · Grid: new items · feeds: refill</dd>
-        <dt><kbd>G</kbd></dt><dd>show where each change happens</dd>
-        <dt><kbd>Esc</kbd></dt><dd>back to setup</dd>
+        {#each wallKeys(settings.s.rateKeys, settings.s.rateList) as row}
+          <dt>
+            {#each row.keys as k}{#if k === "–"}–{:else}<kbd>{k}</kbd>{/if}{" "}{/each}{#if row.also}{row.keys.length ? "/ " : ""}{row.also}{/if}
+          </dt>
+          <dd>{row.does}</dd>
+        {/each}
       </dl>
       <p>The tile under the pointer is never moved by other tiles' changes, and changes in place when it ends.</p>
     </div>
@@ -208,6 +201,11 @@
   }
   .chip.warn {
     color: var(--yellow);
+  }
+  .chip.detail .ci {
+    display: inline-flex;
+    color: var(--purple);
+    margin-right: 6px;
   }
   .chip.detail {
     max-width: 320px;
@@ -306,7 +304,9 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 600px;
+    width: 640px;
+    max-height: calc(100% - 140px);
+    overflow-y: auto;
     padding: 20px 24px;
     border-radius: 12px;
     background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
