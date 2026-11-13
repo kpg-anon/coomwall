@@ -4,6 +4,10 @@
 //! Windows is `http://cw.localhost/<percent-encoded absolute path>`. Video
 //! elements always send `Range:` headers; each one is answered with at most
 //! [`CHUNK`] bytes read from disk, so memory use does not grow with file size.
+//!
+//! Only media files are served (by extension; anything else is 403), and
+//! with no CORS header: the page shows them in <img> and <video>, which do
+//! not need one, and no script can read other files on the disk through it.
 
 use coomwall_engine::range::parse_range;
 use percent_encoding::percent_decode_str;
@@ -14,38 +18,39 @@ use tauri::http::{header, Request, Response, StatusCode};
 
 pub const SCHEME: &str = "cw";
 const CHUNK: u64 = 4 * 1024 * 1024;
-/// Requests without a Range header (images) get the whole file up to this size.
-const WHOLE_MAX: u64 = 256 * 1024 * 1024;
+/// Requests without a Range header (images) get the whole file up to this
+/// size; a larger one is answered in chunks like a video.
+const WHOLE_MAX: u64 = 48 * 1024 * 1024;
 
-fn mime(path: &Path) -> &'static str {
+/// The media type, or None for a file that is not media.
+fn mime(path: &Path) -> Option<&'static str> {
     match path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
-        Some("jpg" | "jpeg" | "jfif") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("webp") => "image/webp",
-        Some("gif") => "image/gif",
-        Some("avif") => "image/avif",
-        Some("bmp") => "image/bmp",
-        Some("mp4" | "m4v") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("mov") => "video/quicktime",
-        Some("mkv") => "video/x-matroska",
-        Some("ogv") => "video/ogg",
-        _ => "application/octet-stream",
+        Some("jpg" | "jpeg" | "jfif") => Some("image/jpeg"),
+        Some("png") => Some("image/png"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        Some("avif") => Some("image/avif"),
+        Some("bmp") => Some("image/bmp"),
+        Some("mp4" | "m4v") => Some("video/mp4"),
+        Some("webm") => Some("video/webm"),
+        Some("mov") => Some("video/quicktime"),
+        Some("mkv") => Some("video/x-matroska"),
+        Some("ogv") => Some("video/ogg"),
+        _ => None,
     }
 }
 
 fn status(code: StatusCode) -> Response<Vec<u8>> {
-    Response::builder()
-        .status(code)
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .body(Vec::new())
-        .unwrap()
+    Response::builder().status(code).body(Vec::new()).unwrap()
 }
 
 pub fn serve(request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let raw = request.uri().path().trim_start_matches('/');
     let decoded = percent_decode_str(raw).decode_utf8_lossy().into_owned();
     let path = Path::new(&decoded);
+    let Some(kind) = mime(path) else {
+        return status(StatusCode::FORBIDDEN);
+    };
     let Ok(mut file) = File::open(path) else {
         return status(StatusCode::NOT_FOUND);
     };
@@ -53,9 +58,8 @@ pub fn serve(request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let range = request.headers().get(header::RANGE).and_then(|v| v.to_str().ok());
 
     let builder = Response::builder()
-        .header(header::CONTENT_TYPE, mime(path))
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        .header(header::CONTENT_TYPE, kind)
+        .header(header::ACCEPT_RANGES, "bytes");
 
     match range {
         Some(value) => {

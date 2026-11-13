@@ -98,6 +98,8 @@ pub fn run() {
             commands::gpu_info,
             commands::launch_color,
             commands::restart,
+            commands::open_media,
+            commands::open_links_dir,
             sessions::list_sessions,
             sessions::get_session,
             sessions::put_session_wall,
@@ -111,6 +113,10 @@ pub fn run() {
             ytdl::fetch_link,
             ytdl::links_dir,
             ytdl::resolve_link,
+            ytdl::cancel_link,
+            ytdl::links_size,
+            ytdl::clear_links,
+            ytdl::tools_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running coomwall");

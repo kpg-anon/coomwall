@@ -77,16 +77,40 @@ fn skip_dir(name: &str) -> bool {
     name.starts_with('.') || name.eq_ignore_ascii_case("$RECYCLE.BIN") || name.eq_ignore_ascii_case("System Volume Information")
 }
 
+/// A path on another computer: `\\host\share`, `//host/share`, `\\?\UNC\…`,
+/// or `file://host/…` once its scheme is stripped. `\\?\C:\` and `\\.\` are local.
+pub fn is_network(path: &str) -> bool {
+    let p = path.trim().replace('/', "\\");
+    if p.to_ascii_uppercase().starts_with(r"\\?\UNC\") {
+        return true;
+    }
+    p.starts_with(r"\\") && !p.starts_with(r"\\?\") && !p.starts_with(r"\\.\")
+}
+
 /// Entries of an `.m3u`, local paths resolved against the playlist's folder.
 /// `#EXTINF` and other directives are skipped; a non-UTF-8 file is read lossily.
 pub fn read_m3u(path: &Path) -> std::io::Result<Vec<String>> {
     let bytes = fs::read(path)?;
     let text = String::from_utf8_lossy(&bytes);
     let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    // A network path (\\host\share\x.mp4) in a playlist makes Windows log in
+    // to that host as soon as the path is touched, which sends the user's
+    // password hash there. Only a playlist that is itself on a network share
+    // may point at one.
+    let on_share = is_network(&path.to_string_lossy());
     Ok(text
         .lines()
         .map(|l| l.trim().trim_start_matches('\u{feff}'))
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter(|l| {
+            // file:///C:/x is local, file://host/x is on another computer
+            let p = match (l.strip_prefix("file:///"), l.strip_prefix("file://")) {
+                (Some(local), _) => local.to_string(),
+                (None, Some(host)) => format!(r"\\{host}"),
+                _ => l.to_string(),
+            };
+            on_share || is_url(l) || !is_network(&p)
+        })
         .map(|l| {
             if is_url(l) {
                 l.to_string()
@@ -257,6 +281,17 @@ mod tests {
     fn touch(p: &Path) {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, b"x").unwrap();
+    }
+
+    #[test]
+    fn a_local_playlist_never_points_at_another_computer() {
+        let dir = tempfile::tempdir().unwrap();
+        let list = dir.path().join("list.m3u");
+        fs::write(&list, "\\\\evil\\s\\a.mp4\n//evil/s/b.mp4\nfile://evil/s/c.mp4\n\\\\?\\UNC\\evil\\s\\d.mp4\nfile:///C:/v/e.mp4\nf.mp4\nhttps://example.com/g.mp4\n").unwrap();
+        let got = read_m3u(&list).unwrap();
+        assert_eq!(got.len(), 3, "{got:?}");
+        assert!(got.iter().any(|p| p.ends_with("e.mp4")) && got.iter().any(|p| p.ends_with("f.mp4")) && got.iter().any(|p| p.ends_with("g.mp4")));
+        assert!(is_network(r"\\nas\media") && !is_network(r"\\?\C:\x") && !is_network(r"C:\x"));
     }
 
     #[test]

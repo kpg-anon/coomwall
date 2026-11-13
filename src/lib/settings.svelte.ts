@@ -21,6 +21,8 @@ export type RateKeys = "list" | "fine";
 export type GridFitCrop = "auto" | "exact" | "loose";
 export type TypeFilter = "mixed" | "videos" | "images";
 export type ShapeFilter = "any" | "portrait" | "landscape";
+/** the order files play in: random, newest first (by file date), or as the folders list them */
+export type Order = "shuffle" | "newest" | "folder";
 /** auto: Windows decides (the power-saving GPU for WebView2) */
 export type GpuChoice = "auto" | "high" | "low";
 /** direct: color values go to the display as they are in the file, as mpv
@@ -99,7 +101,9 @@ export interface Settings {
   pauseUnfocused: boolean;
   type: TypeFilter;
   shape: ShapeFilter;
-  shuffle: boolean;
+  /** files whose shorter side is smaller than this many pixels are skipped; 0 = any */
+  minSide: number;
+  order: Order;
   /** seconds an image stays up (Mosaic) */
   imageSeconds: number;
   /** videos longer than this many seconds are skipped, in every mode; 0 = no limit */
@@ -167,6 +171,7 @@ export const LAYOUT_KEYS = [
   "stackLinkMode",
   "type",
   "shape",
+  "minSide",
 ] as const;
 export type Layout = Pick<Settings, (typeof LAYOUT_KEYS)[number]>;
 /** `sources`: this display's own folders and playlists. Missing or empty,
@@ -176,6 +181,18 @@ export type WallLayout = Layout & { on: boolean; sources?: string[] };
 /** A copy of the layout keys of `from` (arrays copied, not shared). */
 export function layoutOf(from: Layout): Layout {
   return Object.fromEntries(LAYOUT_KEYS.map((k) => [k, Array.isArray(from[k]) ? JSON.parse(JSON.stringify(from[k])) : from[k]])) as unknown as Layout;
+}
+
+/** A layout from a saved wall, over `base`: a key the save does not have
+ * (it was made before that setting existed) keeps base's value instead of
+ * becoming undefined. */
+export function savedLayout(saved: Partial<Layout> | null | undefined, base: Layout): Layout {
+  const out = layoutOf(base);
+  for (const k of LAYOUT_KEYS) {
+    const v = saved?.[k];
+    if (v !== undefined && v !== null) (out as any)[k] = Array.isArray(v) ? JSON.parse(JSON.stringify(v)) : v;
+  }
+  return out;
 }
 
 export const DEFAULTS: Settings = {
@@ -214,7 +231,8 @@ export const DEFAULTS: Settings = {
   pauseUnfocused: false,
   type: "mixed",
   shape: "any",
-  shuffle: true,
+  minSide: 0,
+  order: "shuffle",
   imageSeconds: 7,
   maxVideoSeconds: 0,
   minVideoSeconds: 6,
@@ -266,6 +284,9 @@ function migrate(o: any) {
     if (typeof o.centerTiles === "number") o.tiles = o.centerTiles;
   }
   delete o.centerTiles;
+  // before 1.0 the order was a Shuffle checkbox
+  if (o.order === undefined && typeof o.shuffle === "boolean") o.order = o.shuffle ? "shuffle" : "folder";
+  delete o.shuffle;
 }
 
 /** A speed list as typed in setup: positive numbers, fastest first, no repeats. */

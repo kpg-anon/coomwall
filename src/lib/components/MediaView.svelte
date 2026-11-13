@@ -1,8 +1,10 @@
 <script lang="ts">
   // One image or video, filling its box. Reports `onready` once its first
   // frame is decoded (so a tile can fade it in without showing an empty
-  // frame) and `onended` when a video ends for good.
+  // frame) and `onended` when a video ends for good. A streamed link's
+  // separate sound (media.audioUrl) plays in an <audio> that follows the video.
   import type { Media } from "$lib/queue.svelte";
+  import { followVideo } from "$lib/audiosync";
 
   interface Props {
     media: Media;
@@ -21,6 +23,8 @@
     loopUntil?: number;
     onready?: () => void;
     onended?: () => void;
+    /** it could not be loaded or played; without this, a failure counts as its end */
+    onerror?: (why: string) => void;
   }
 
   let {
@@ -36,6 +40,7 @@
     loopUntil = 0,
     onready,
     onended,
+    onerror,
   }: Props = $props();
 
   const objectPosition = $derived(position ? `${position.x}% ${position.y}%` : undefined);
@@ -100,14 +105,9 @@
     else video.play().catch(() => {});
   });
 
-  /** the sound follows the picture: playing, paused, and within 0.3 s */
-  function follow() {
-    if (!audio || !video) return;
-    if (Math.abs(audio.currentTime - video.currentTime) > 0.3) audio.currentTime = video.currentTime;
-    if (video.paused || video.readyState < 3) {
-      if (!audio.paused) audio.pause();
-    } else if (audio.paused) audio.play().catch(() => {});
-  }
+  $effect(() => {
+    if (video && audio) return followVideo(video, audio);
+  });
 
   $effect(() => {
     const a = audio;
@@ -150,7 +150,6 @@
   }
 
   function time() {
-    follow();
     const t = video!.currentTime;
     const d = t - lastTime;
     if (d > 0 && d < 2) played += d;
@@ -169,7 +168,9 @@
 
   function failed() {
     ready();
-    onended?.();
+    const why = video?.error ? `${["", "loading was stopped", "a network error", "it could not be decoded", "the format is not supported"][video.error.code] ?? "an error"}${video.error.message ? ` (${video.error.message})` : ""}` : "it could not be loaded";
+    if (onerror) onerror(why);
+    else onended?.();
   }
 </script>
 
@@ -195,11 +196,6 @@
     ontimeupdate={time}
     onended={ended}
     onerror={failed}
-    onplay={follow}
-    onpause={follow}
-    onseeked={follow}
-    onwaiting={follow}
-    onplaying={follow}
   ></video>
   {#if media.audioUrl}
     <audio bind:this={audio} src={media.audioUrl} preload="auto" {loop}></audio>

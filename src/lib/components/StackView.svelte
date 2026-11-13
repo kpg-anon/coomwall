@@ -13,7 +13,7 @@
   import type { Media } from "$lib/queue.svelte";
   import type { Pan } from "$lib/session";
   import type { Settings } from "$lib/settings.svelte";
-  import type { StackController } from "$lib/stack.svelte";
+  import { LOAD_LIMIT_MS, type StackController } from "$lib/stack.svelte";
   import { I } from "$lib/icons";
 
   interface Props {
@@ -52,9 +52,15 @@
       const top = layers[layers.length - 1];
       if (top?.key === m.key) return;
       // the pan belongs to the item: the old one keeps its own while it fades
-      if (top) top.pan = ctl.pan && { ...ctl.pan };
-      layers.push({ key: m.key, media: m, shown: false });
+      if (top) top.pan = ctl.outgoingPan;
+      const layer: Layer = { key: m.key, media: m, shown: false };
+      layers.push(layer);
       elapsed = 0;
+      // a stream that stalls without an error event would leave the old item up for ever
+      setTimeout(() => {
+        const live = layers.find((l) => l.key === layer.key);
+        if (live && !live.shown && ctl.item?.key === m.key) ctl.failed(m, `it did not start within ${LOAD_LIMIT_MS / 1000} s`);
+      }, LOAD_LIMIT_MS);
     });
   });
 
@@ -293,6 +299,10 @@
             loopUntil={s.minVideoSeconds}
             onready={() => ready(layer)}
             onended={() => layer === top && ctl.done()}
+            onerror={(why) => {
+              const el = views[layer.key]?.element();
+              ctl.failed(layer.media, why, el instanceof HTMLVideoElement && Number.isFinite(el.currentTime) ? el.currentTime : 0);
+            }}
           />
         </div>
         {#each g.panes as r, i (i)}

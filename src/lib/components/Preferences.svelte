@@ -16,7 +16,6 @@
   import { I } from "$lib/icons";
   import Range from "./Range.svelte";
   import Segmented from "./Segmented.svelte";
-  import { openPath } from "@tauri-apps/plugin-opener";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -41,6 +40,20 @@
 
   const s = settings.s;
   let gpu = $state.raw<GpuInfo | null>(null);
+  /** System tab: the links cache, and the tools links need */
+  let linksMB = $state<number | null>(null);
+  let linksNote = $state("");
+  let tools = $state.raw<{ ytdlp: string | null; ffmpeg: string | null; webview: string | null } | null>(null);
+
+  async function clearLinks() {
+    try {
+      const freed = await api.clearLinks();
+      linksNote = `${(freed / 1048576).toFixed(0)} MB freed`;
+    } catch (e) {
+      linksNote = String(e);
+    }
+    linksMB = (await api.linksSize().catch(() => 0)) / 1048576;
+  }
   /** the color setting this launch started with; null until Rust answers */
   let launchColor = $state<string | null>(null);
   let restarting = $state(false);
@@ -77,6 +90,8 @@
 
   onMount(() => {
     api.gpuInfo().then((g) => (gpu = g)).catch(() => {});
+    api.linksSize().then((b) => (linksMB = b / 1048576)).catch(() => (linksMB = 0));
+    api.toolsInfo().then((t) => (tools = t)).catch(() => {});
     api.launchColor().then((c) => (launchColor = c)).catch(() => {});
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -303,7 +318,7 @@
             </div>
             <div class="select">
               <label class="select">
-                <span title="Stack mode downloads page links with yt-dlp. For a video that needs a login (age-restricted, members only), yt-dlp can read that site's cookies from your browser." class="label explained">yt-dlp cookies</span>
+                <span title="Stack mode plays page links with yt-dlp. For a video that needs a login (age-restricted, members only), yt-dlp can read that site's cookies from your browser. On Windows, Chrome, Edge and Brave lock or encrypt their cookies while they run, so From Firefox is the one that works reliably." class="label explained">yt-dlp cookies</span>
                 <select bind:value={s.ytdlCookies}>
                   <option value="">None</option>
                   <option value="firefox">From Firefox</option>
@@ -313,8 +328,19 @@
                 </select>
               </label>
               <span class="note">
-                Links are downloaded once and kept.
-                <button class="restart" onclick={() => api.linksDir().then((d) => openPath(d)).catch(() => {})}><span class="nf">{I.folderOpen}</span>Open the downloads folder</button>
+                Downloaded links: {linksMB === null ? "…" : `${linksMB.toFixed(linksMB < 10 ? 1 : 0)} MB`}
+                <button class="restart" onclick={() => api.openLinksDir().catch(() => {})}><span class="nf">{I.folderOpen}</span>Open the folder</button>
+                <button class="restart" disabled={!linksMB} onclick={clearLinks}><span class="nf">{I.trash}</span>Clear</button>
+                {#if linksNote}<span class="warn">{linksNote}</span>{/if}
+              </span>
+              <span class="note" class:warn={tools && !tools.ytdlp}>
+                {#if !tools}
+                  Looking for yt-dlp and ffmpeg…
+                {:else}
+                  {tools.ytdlp ? `yt-dlp ${tools.ytdlp}` : "yt-dlp not found on PATH: links cannot play (winget install yt-dlp)"} ·
+                  {tools.ffmpeg ? `ffmpeg ${tools.ffmpeg}` : "ffmpeg not found: downloads limited to one-file formats (360p on YouTube); streaming is not affected"}
+                  {#if tools.webview} · WebView2 {tools.webview}{/if}
+                {/if}
               </span>
             </div>
           </section>

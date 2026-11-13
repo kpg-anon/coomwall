@@ -5,7 +5,12 @@
 // the webview cannot decode fails here and never reaches the wall. Items whose
 // size was cached by an earlier run skip the measurement.
 import { api, mediaUrl, type DimRecord, type Kind, type MediaEntry } from "./api";
-import type { ShapeFilter, TypeFilter } from "./settings.svelte";
+import type { Order, ShapeFilter, TypeFilter } from "./settings.svelte";
+import { needsDownload } from "./links";
+
+/** A page link in a playlist (reddit, YouTube...), as yt-dlp resolves it to
+ * streams the page can play; null when it has none. */
+export type LinkResolver = (url: string) => Promise<{ video: string; audio: string | null; w: number; h: number; dur: number | null; title: string } | null>;
 
 export interface Media {
   key: number;
@@ -93,7 +98,8 @@ export async function measureEntry(entry: MediaEntry): Promise<Media | null> {
   const url = mediaUrl(entry.path);
   const dims: Dims | null = entry.w && entry.h ? { w: entry.w, h: entry.h, dur: entry.dur } : await probe(entry, url);
   if (!dims) return null;
-  if (!entry.w || !entry.h) api.rememberDims([{ path: entry.path, size: entry.size, mtime: entry.mtime, w: dims.w, h: dims.h, dur: dims.dur }]).catch(() => {});
+  // a stream URL (a link played from the site) changes every time: not worth remembering
+  if ((!entry.w || !entry.h) && !/^https?:/i.test(entry.path)) api.rememberDims([{ path: entry.path, size: entry.size, mtime: entry.mtime, w: dims.w, h: dims.h, dur: dims.dur }]).catch(() => {});
   return { key: extraKey--, path: entry.path, name: baseName(entry.path), kind: entry.kind, url, w: dims.w, h: dims.h, aspect: dims.w / dims.h, dur: dims.dur, skips: 0 };
 }
 
@@ -145,14 +151,18 @@ export class MediaQueue {
     entries: MediaEntry[],
     private type: TypeFilter,
     private shape: ShapeFilter,
-    private doShuffle: boolean,
+    private ordering: Order,
     /** videos longer than this many seconds are never offered; 0 = no limit */
     private maxVideo = 0,
+    /** files whose shorter side is smaller than this are never offered; 0 = any */
+    private minSide = 0,
+    /** page links in playlists play through this (yt-dlp); without it they are skipped as unplayable */
+    private links: LinkResolver | null = null,
   ) {
     this.pool = entries.filter((e) => type === "mixed" || (type === "images" ? e.kind === "image" : e.kind === "video"));
     const typed = this.pool.length;
-    // with cached dimensions the shape filter applies before anything loads
-    if (shape !== "any") this.pool = this.pool.filter((e) => !e.w || !e.h || this.shapeOk(e.w, e.h));
+    // with cached dimensions the shape and size filters apply before anything loads
+    if (shape !== "any" || minSide > 0) this.pool = this.pool.filter((e) => !e.w || !e.h || this.shapeOk(e.w, e.h));
     // and so does the length limit, with a cached duration
     if (maxVideo > 0) this.pool = this.pool.filter((e) => this.lengthOk(e.kind, e.dur));
     this.leftOut = typed - this.pool.length;
@@ -163,6 +173,7 @@ export class MediaQueue {
   }
 
   private shapeOk(w: number, h: number): boolean {
+    if (this.minSide > 0 && Math.min(w, h) < this.minSide) return false;
     return this.shape === "any" || (this.shape === "portrait" ? h > w : w >= h);
   }
 
@@ -202,7 +213,9 @@ export class MediaQueue {
 
   private reorder() {
     this.order = this.pool.map((_, i) => i);
-    if (this.doShuffle) shuffle(this.order);
+    if (this.ordering === "shuffle") shuffle(this.order);
+    // newest first by the file's date; links (no date) after the files
+    else if (this.ordering === "newest") this.order.sort((a, b) => (this.pool[b].mtime || 0) - (this.pool[a].mtime || 0));
     this.cursor = 0;
   }
 
@@ -236,9 +249,20 @@ export class MediaQueue {
       this.dry++;
       return;
     }
-    const url = mediaUrl(entry.path);
+    let url = mediaUrl(entry.path);
+    let audioUrl: string | undefined;
+    let title: string | undefined;
     let dims: Dims | null = entry.w && entry.h ? { w: entry.w, h: entry.h, dur: entry.dur } : null;
-    if (!dims) {
+    if (needsDownload(entry.path)) {
+      // a page link: its streams, found by yt-dlp each time (they expire)
+      const r = this.links ? await this.links(entry.path).catch(() => null) : null;
+      dims = r ? { w: r.w, h: r.h, dur: r.dur } : null;
+      if (r) {
+        url = r.video;
+        audioUrl = r.audio ?? undefined;
+        title = r.title || undefined;
+      }
+    } else if (!dims) {
       dims = await probe(entry, url);
       if (dims) {
         entry.w = dims.w;
@@ -290,9 +314,10 @@ export class MediaQueue {
     this.ready.push({
       key: this.keySeq++,
       path: entry.path,
-      name: baseName(entry.path),
+      name: title ?? baseName(entry.path),
       kind: entry.kind,
       url,
+      audioUrl,
       w: dims.w,
       h: dims.h,
       aspect: dims.w / dims.h,

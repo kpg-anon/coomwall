@@ -23,6 +23,9 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 
+/// named saves kept; saving one more drops the oldest
+const MAX_NAMED: usize = 200;
+
 pub struct Sessions {
     path: PathBuf,
     lock: Mutex<()>,
@@ -87,7 +90,7 @@ impl Sessions {
 
     /// The file, with anything missing or malformed read as no sessions.
     fn read(&self) -> Value {
-        let v: Value = fs::read(&self.path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+        let v = crate::commands::read_json(&self.path);
         let last = v.get("last").filter(|l| valid(l)).cloned().unwrap_or(Value::Null);
         let named: Vec<Value> = v.get("named").and_then(Value::as_array).map(|a| a.iter().filter(|s| valid(s)).cloned().collect()).unwrap_or_default();
         json!({ "last": last, "named": named })
@@ -131,14 +134,26 @@ impl Sessions {
                 }
             }
         };
+        // the walls of an older start, still saving as they close, must not
+        // replace the session of the walls started after them
+        if name.is_none() && valid(slot) && slot["run"].as_u64().is_some_and(|r| r > run) {
+            return Ok(());
+        }
         if slot["run"].as_u64() != Some(run) || !valid(slot) {
             *slot = fresh();
         }
         if let Some(o) = wall.as_object_mut() {
             o.insert("monitor".into(), monitor.clone().into());
         }
+        // nothing changed (a paused wall of images): no write
+        if name.is_none() && slot["walls"].get(monitor.as_str()) == Some(&wall) {
+            return Ok(());
+        }
         slot["walls"][monitor.as_str()] = wall;
         slot["savedAt"] = now.into();
+        if let Some(named) = file["named"].as_array_mut() {
+            named.truncate(MAX_NAMED);
+        }
         self.write(&file)
     }
 

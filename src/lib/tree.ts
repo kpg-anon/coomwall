@@ -20,6 +20,15 @@ function pathTo(t: Tree, id: number, r: Rect, out: { node: Split; inA: boolean; 
   return null;
 }
 
+/** how many tiles lie side by side across a subtree, along a row split's
+ * axis (`row`) or a column split's: the most any line through it crosses */
+function across(t: Tree, row: boolean): number {
+  if (t.k === "leaf") return 1;
+  const a = across(t.a, row);
+  const b = across(t.b, row);
+  return (t.k === "row") === row ? a + b : Math.max(a, b);
+}
+
 function leaves(t: Tree, out: number[] = []): number[] {
   if (t.k === "leaf") out.push(t.id);
   else {
@@ -54,8 +63,13 @@ export function resizeLeaf(tree: Tree, bounds: Rect, id: number, factor: number,
   for (const p of free) {
     const len = p.node.k === "row" ? p.rect.w : p.rect.h;
     const share = p.inA ? p.node.f : 1 - p.node.f;
-    const lo = Math.max(0.04, minPx / len);
-    const hi = 1 - lo;
+    // each side keeps minPx for every tile across it, not only for the
+    // tiles touching the cut
+    const row = p.node.k === "row";
+    const own = p.inA ? p.node.a : p.node.b;
+    const other = p.inA ? p.node.b : p.node.a;
+    const lo = Math.max(0.04, (minPx * across(own, row)) / len);
+    const hi = 1 - Math.max(0.04, (minPx * across(other, row)) / len);
     if (lo >= hi) continue;
     const next = Math.max(lo, Math.min(hi, share * k));
     if (Math.abs(next - share) * len < 1) continue;

@@ -14,11 +14,12 @@
   import { getCurrentWindow, availableMonitors } from "@tauri-apps/api/window";
   import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
   import { listen } from "@tauri-apps/api/event";
-  import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { api, isUrl, type GpuInfo, type Rect } from "$lib/api";
   import { settings, LIMITS, MODE_NAMES, cycleRate, layoutOf, type Layout, type Mode } from "$lib/settings.svelte";
   import { library } from "$lib/library.svelte";
-  import { MediaQueue, measureEntry, type Media } from "$lib/queue.svelte";
+  import { MediaQueue, measureEntry, type LinkResolver, type Media } from "$lib/queue.svelte";
+  import { heightFor, resolveLink } from "$lib/links";
   import { MosaicController, type WallSeed } from "$lib/mosaic.svelte";
   import { stamp, type SavedItem, type Thumb, type WallSnapshot } from "$lib/session";
   import { I } from "$lib/icons";
@@ -43,7 +44,21 @@
   /** keys that still reach the wall while one item is open in the viewer */
   const VIEWER_PASS = new Set(["m", "o", "[", "]", "{", "}", "?", "h", "t"]);
 
-  const queue = new MediaQueue(library.items, s.type, s.shape, s.shuffle, s.maxVideoSeconds);
+  // page links in playlists play through yt-dlp, two at a time at most
+  let resolving = 0;
+  const linkSlots: (() => void)[] = [];
+  const resolveForQueue: LinkResolver = async (url) => {
+    while (resolving >= 2) await new Promise<void>((r) => linkSlots.push(r));
+    resolving++;
+    try {
+      const r = await resolveLink(url, heightFor(Math.min(window.innerWidth, window.innerHeight) / 2), s.ytdlCookies);
+      return r.width && r.height ? { video: r.video, audio: r.audio, w: r.width, h: r.height, dur: r.duration, title: r.title } : null;
+    } finally {
+      resolving--;
+      linkSlots.shift()?.();
+    }
+  };
+  const queue = new MediaQueue(library.items, s.type, s.shape, s.order, s.maxVideoSeconds, s.minSide, resolveForQueue);
   let w = $state(0);
   let h = $state(0);
   let mode = $state<Mode>(s.mode);
@@ -134,7 +149,8 @@
     let ctl: object;
     let first: Promise<unknown> = Promise.resolve();
     if (mode === "stack") {
-      const st = new StackController(queue, s, { w, h });
+      // "Stack it" (a seed with its item) goes on with the sources afterwards
+      const st = new StackController(queue, s, { w, h }, stackSeed?.media ? false : undefined);
       stack = ctl = st;
       first = st.start(stackSeed);
     } else if (mode === "grid") {
@@ -219,7 +235,7 @@
     tiled?.forget(path);
     if (tiled) for (const t of tiled.tiles) if (t.media.path === path && !t.leaving) tiled.next(t.id);
     feed?.remove(path);
-    stack?.forget(path);
+    if (stack && !stack.forget(path)) say("this is the file or link Stack is set to show; choose another in setup", 3000);
   }
 
   /** "Remove from wall" (this session) or "Never show again" (saved; scans skip it) */
@@ -312,7 +328,7 @@
 
   function act(a: MenuAction, m: Media) {
     if (a === "reveal") revealItemInDir(m.path).catch((e) => say(String(e)));
-    else if (a === "open") (isUrl(m.path) ? openUrl(m.path) : openPath(m.path)).catch((e) => say(String(e)));
+    else if (a === "open") api.openMedia(m.path).catch((e) => say(String(e)));
     else if (a === "center") center(m);
     else if (a === "uncenter") toggleCenter();
     else if (a === "prev" || a === "next") stepTile(m, a === "prev");
@@ -640,6 +656,8 @@
     if (tiled) {
       const live = tiled.tiles.filter((t) => !t.leaving && !t.fixed);
       if (!live.length) return null;
+      // Grid resumes saved tile i into cell i: save them in cell (reading) order
+      if (tiled instanceof GridController) live.sort((a, b) => Math.round(a.rect.y) - Math.round(b.rect.y) || Math.round(a.rect.x) - Math.round(b.rect.x));
       const now = performance.now();
       const tiles = live.map((t) => ({ ...savedItem(t.media), id: t.id, pinned: t.pinned, pan: t.pan ? { ...t.pan } : undefined, age: Math.round(now - t.since) }));
       const tree = tiled instanceof MosaicController ? tiled.layoutTree : null;
@@ -946,7 +964,7 @@
     const frames = setInterval(sampleFrames, 2000);
     api.gpuInfo().then((g) => (gpu = g)).catch(() => {});
     poke();
-    if (import.meta.env.DEV) (window as any).__cwWall = { tiled: () => tiled, mosaic: () => tiled, feed: () => feed, stack: () => stack, queue, setMode, open, center, snapshot, autosave, settled: () => settledFor !== null && settledFor === (tiled ?? feed), state: () => ({ mode, paused, wallPaused, lightbox: lightbox?.media.path ?? null, center: centerMedia?.path ?? null, centered, feedCenter: feed?.center ?? null, sound: [...sounding.keys()], soundPaths: soundPaths() }) };
+    if (import.meta.env.DEV) (window as any).__cwWall = { tiled: () => tiled, mosaic: () => tiled, feed: () => feed, stack: () => stack, queue, setMode, open, center, snapshot, autosave, settled: () => settledFor !== null && settledFor === (tiled ?? feed ?? stack), state: () => ({ mode, paused, wallPaused, lightbox: lightbox?.media.path ?? null, center: centerMedia?.path ?? null, centered, feedCenter: feed?.center ?? null, sound: [...sounding.keys()], soundPaths: soundPaths() }) };
     return () => {
       alive = false;
       unmounted = true;
@@ -960,6 +978,7 @@
       clearTimeout(hudTimer);
       tiled?.destroy();
       feed?.destroy();
+      stack?.destroy();
       queue.destroy();
       link?.destroy();
       // a wall window is closing; nothing to restore

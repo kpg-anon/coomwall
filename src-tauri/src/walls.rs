@@ -62,9 +62,13 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
         }
         let w = builder.build().map_err(err)?;
         let (pos, size) = (m.position(), m.size());
-        w.set_position(PhysicalPosition::new(pos.x + 60, pos.y + 60)).map_err(err)?;
-        w.set_fullscreen(true).map_err(err)?;
-        w.show().map_err(err)?;
+        let placed = w.set_position(PhysicalPosition::new(pos.x + 60, pos.y + 60)).and_then(|_| w.set_fullscreen(true)).and_then(|_| w.show());
+        if let Err(e) = placed {
+            // a hidden wall window left behind would count as a wall still
+            // open, and setup would never come back
+            let _ = w.destroy();
+            return Err(err(e));
+        }
         let inside = cursor.is_some_and(|c| {
             c.x >= pos.x as f64 && c.y >= pos.y as f64 && c.x < (pos.x + size.width as i32) as f64 && c.y < (pos.y + size.height as i32) as f64
         });

@@ -12,11 +12,11 @@
   import { availableMonitors, currentMonitor, type Monitor } from "@tauri-apps/api/window";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { getVersion } from "@tauri-apps/api/app";
-  import { settings, DEFAULTS, LIMITS, MODE_NAMES, layoutOf, type Layout, type Mode, type WallLayout } from "$lib/settings.svelte";
+  import { settings, DEFAULTS, LIMITS, MODE_NAMES, layoutOf, savedLayout, type Layout, type Mode, type WallLayout } from "$lib/settings.svelte";
   import { cropIn, fitTolerance, gridLabel, gridRects } from "$lib/grid";
   import { library } from "$lib/library.svelte";
   import { api, isUrl } from "$lib/api";
-  import { fetchLink, heightFor, needsDownload, progressText } from "$lib/links";
+  import { fetchLink, heightFor, needsDownload } from "$lib/links";
   import { stamp, type SessionInfo } from "$lib/session";
   import { I } from "$lib/icons";
   import Range from "./Range.svelte";
@@ -52,12 +52,12 @@
   let resuming = $state(false);
 
   const MODES: { id: Mode; icon: string; line: string; key: string }[] = [
-    { id: "mosaic", icon: I.th, line: "Even tiles; one block changes at a time.", key: "1" },
-    { id: "ribbon", icon: I.bars, line: "Rows glide sideways, items at their own shape.", key: "2" },
-    { id: "cascade", icon: I.columns, line: "Columns drift up or down like a slow feed.", key: "3" },
-    { id: "dynamic", icon: I.random, line: "A new item takes the largest tile every few seconds.", key: "4" },
-    { id: "grid", icon: I.thLarge, line: "Fixed equal cells: 3×1, 2×2 or your own.", key: "5" },
-    { id: "stack", icon: I.layers, line: "One item repeated side by side, in sync.", key: "6" },
+    { id: "mosaic", icon: I.th, line: "Even tiles; changes stay local.", key: "1" },
+    { id: "ribbon", icon: I.bars, line: "Rows glide sideways.", key: "2" },
+    { id: "cascade", icon: I.columns, line: "Columns drift up or down.", key: "3" },
+    { id: "dynamic", icon: I.random, line: "The newest item gets the largest tile.", key: "4" },
+    { id: "grid", icon: I.thLarge, line: "Fixed cells: 3×1, 2×2 or your own.", key: "5" },
+    { id: "stack", icon: I.layers, line: "One item, side by side, in sync.", key: "6" },
   ];
   const MEDIA_EXTS = ["mp4", "m4v", "webm", "mov", "mkv", "ogv", "jpg", "jpeg", "jfif", "png", "webp", "gif", "avif", "bmp"];
 
@@ -150,12 +150,12 @@
   async function prefetch() {
     const url = L.stackItem.trim();
     if (L.stackLinkMode !== "download" || !needsDownload(url) || (linkState?.url === url && !linkState.error)) return;
-    linkState = { url, text: progressText(null), error: false, done: false };
+    linkState = { url, text: "finding the video", error: false, done: false };
     const [mw, mh] = selMonitor ? [selMonitor.size.width / (window.devicePixelRatio || 1), selMonitor.size.height / (window.devicePixelRatio || 1)] : [1920, 1080];
     const px = Math.min(mw, mh, Math.max(mw, mh) / Math.max(1, L.stackPanes));
     try {
-      await fetchLink(url, heightFor(px), s.ytdlCookies, (p) => {
-        if (linkState?.url === url) linkState.text = progressText(p);
+      await fetchLink(url, heightFor(px), s.ytdlCookies, (text) => {
+        if (linkState?.url === url) linkState.text = text;
       });
       if (linkState?.url === url) linkState = { url, text: "downloaded · ready", error: false, done: true };
     } catch (e) {
@@ -334,7 +334,7 @@
         s.sources = [...sess.sources];
         for (const m of monitors) {
           const snap = sess.walls[m.name];
-          if (snap) s.walls[m.name] = { ...layoutOf(snap.layout), on: true, sources: snap.own ? [...snap.sources] : [] };
+          if (snap) s.walls[m.name] = { ...savedLayout(snap.layout, (s.walls[m.name] ?? $state.snapshot(s)) as Layout), on: true, sources: snap.own ? [...snap.sources] : [] };
           else if (s.walls[m.name]) s.walls[m.name].on = false;
           else s.walls[m.name] = { ...layoutOf($state.snapshot(s) as Layout), on: false };
         }
@@ -351,7 +351,7 @@
       // several walls the first one whose display is connected, else its
       // first wall on this window's display.
       const [key, snap] = here[0] ?? entries[0];
-      Object.assign(s, layoutOf(snap.layout));
+      Object.assign(s, savedLayout(snap.layout, $state.snapshot(s) as Layout));
       s.sources = [...snap.sources];
       s.multiWall = false;
       const want = sess.multi ? key : snap.monitor;
@@ -884,6 +884,31 @@
               { value: "landscape", label: "Landscape" },
             ]}
           />
+          <Segmented
+            label="Size"
+            title="Skip small files: only files whose shorter side is at least this many pixels (720 drops anything below 720p). Applies to images and videos."
+            bind:value={L.minSide}
+            def={DEFAULTS.minSide}
+            compact
+            options={[
+              { value: 0, label: "Any" },
+              { value: 480, label: "480+" },
+              { value: 720, label: "720+" },
+              { value: 1080, label: "1080+" },
+            ]}
+          />
+          <Segmented
+            label="Order"
+            title="The order files play in: at random, newest first (by the file's date), or as the folders list them."
+            bind:value={s.order}
+            def={DEFAULTS.order}
+            compact
+            options={[
+              { value: "shuffle", label: "Shuffle" },
+              { value: "newest", label: "Newest" },
+              { value: "folder", label: "Folder" },
+            ]}
+          />
         </section>
 
         <section class="center" class:dim={multi && !s.walls[sel]?.on}>
@@ -965,7 +990,6 @@
               step={0.05}
               format={(v) => `${Math.round(v * 100)}%`}
             />
-            <label class="check"><input type="checkbox" bind:checked={s.shuffle} /><span title="Play files in a random order. Off: in the order of the folders and their files.">Shuffle</span></label>
             <label class="check"><input type="checkbox" bind:checked={s.stagger} /><span title="Ribbon and Cascade: neighboring rows or columns move at slightly different speeds, so their edges do not line up.">Lanes at varied speeds</span></label>
           </div>
         </section>
@@ -1345,7 +1369,7 @@
     display: grid;
     grid-template-columns: auto auto;
     justify-content: space-between;
-    gap: 10px 14px;
+    gap: 4px 14px;
   }
   .span {
     grid-column: 1 / -1;
@@ -1413,6 +1437,8 @@
     align-items: flex-start;
     gap: 6px;
     min-width: 0;
+    /* the key badge hides on a card too narrow for it (six cards at 1180 px) */
+    container-type: inline-size;
     padding: 9px 10px 11px;
     border-radius: 10px;
     border: 1px solid var(--border);
@@ -1445,6 +1471,11 @@
     margin-left: 2px;
     font-size: 10px;
     color: var(--text-muted);
+  }
+  @container (max-width: 112px) {
+    .m-name kbd {
+      display: none;
+    }
   }
   .m-line {
     font-size: 12px;

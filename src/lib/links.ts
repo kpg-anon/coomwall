@@ -22,7 +22,9 @@ export interface LinkProgress {
 
 interface LinkEvent extends Partial<LinkProgress> {
   url: string;
-  kind: "progress" | "done" | "error";
+  kind: "stage" | "progress" | "done" | "error";
+  /** "stage": what yt-dlp is doing, in words */
+  stage?: string;
   path?: string;
   error?: string;
 }
@@ -36,15 +38,16 @@ export function heightFor(side: number): number {
 }
 
 /** The local file for `url`, downloading it first if it is not cached.
- * `onprogress` follows the download. */
-export async function fetchLink(url: string, height: number, cookies: Cookies, onprogress?: (p: LinkProgress) => void): Promise<string> {
+ * `onprogress` follows the download, in words ("downloading video 34% · ..."). */
+export async function fetchLink(url: string, height: number, cookies: Cookies, onprogress?: (text: string) => void): Promise<string> {
   let settle: { ok: (p: string) => void; fail: (e: Error) => void } | null = null;
   const result = new Promise<string>((ok, fail) => (settle = { ok, fail: (e) => fail(e) }));
   // listening before asking: a download that finishes quickly is not missed
   const off = await listen<LinkEvent>("link", (e) => {
     const d = e.payload;
     if (d.url !== url) return;
-    if (d.kind === "progress") onprogress?.({ part: d.part ?? 1, downloaded: d.downloaded ?? null, total: d.total ?? null, speed: d.speed ?? null });
+    if (d.kind === "stage" && d.stage) onprogress?.(d.stage);
+    else if (d.kind === "progress") onprogress?.(`downloading ${progressText({ part: d.part ?? 1, downloaded: d.downloaded ?? null, total: d.total ?? null, speed: d.speed ?? null })}`);
     else if (d.kind === "done" && d.path) settle?.ok(d.path);
     else if (d.kind === "error") settle?.fail(new Error(d.error ?? "the download failed"));
   });

@@ -9,6 +9,7 @@
   import { onMount } from "svelte";
   import type { Media } from "$lib/queue.svelte";
   import { I } from "$lib/icons";
+  import { followVideo } from "$lib/audiosync";
 
   interface Props {
     media: Media;
@@ -33,6 +34,8 @@
   let stage = $state<HTMLDivElement>();
   let xf = $state<HTMLDivElement>();
   let video = $state<HTMLVideoElement>();
+  /** a streamed link's separate sound, following the video */
+  let audio = $state<HTMLAudioElement>();
   let sw = $state(0);
   let sh = $state(0);
   let shown = $state(false);
@@ -215,8 +218,23 @@
 
   $effect(() => {
     if (!video) return;
-    video.muted = muted;
+    video.muted = muted || !!audio;
     video.volume = Math.max(0, Math.min(1, volume / 100));
+    if (audio) {
+      audio.muted = muted;
+      audio.volume = Math.max(0, Math.min(1, volume / 100));
+    }
+  });
+
+  $effect(() => {
+    if (!video || !audio) return;
+    const a = audio;
+    const stop = followVideo(video, a);
+    return () => {
+      stop();
+      a.removeAttribute("src");
+      a.load();
+    };
   });
 
   $effect(() => {
@@ -309,6 +327,7 @@
             onplay={() => (playing = true)}
             onpause={() => (playing = false)}
           ></video>
+          {#if media.audioUrl}<audio bind:this={audio} src={media.audioUrl} preload="auto" loop></audio>{/if}
         {:else}
           <img src={media.url} alt="" draggable="false" onload={() => (shown = true)} onerror={() => (shown = true)} />
         {/if}

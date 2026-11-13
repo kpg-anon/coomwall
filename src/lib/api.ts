@@ -156,4 +156,13 @@ export const api = {
   takeResume: (monitor: string) => invoke<WallSnapshot | null>("take_resume", { monitor }),
   /** where links downloaded with yt-dlp are kept */
   linksDir: () => invoke<string>("links_dir"),
+  openLinksDir: () => invoke<void>("open_links_dir"),
+  /** bytes the downloaded links take; clear deletes them (returns bytes freed) */
+  linksSize: () => invoke<number>("links_size"),
+  clearLinks: () => invoke<number>("clear_links"),
+  cancelLink: (url: string) => invoke<void>("cancel_link", { url }),
+  /** yt-dlp and ffmpeg versions (null: not found), and WebView2's */
+  toolsInfo: () => invoke<{ ytdlp: string | null; ffmpeg: string | null; webview: string | null }>("tools_info"),
+  /** "Open in default app": media files and http(s) links only */
+  openMedia: (path: string) => invoke<void>("open_media", { path }),
 };

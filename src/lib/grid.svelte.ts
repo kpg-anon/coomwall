@@ -141,7 +141,16 @@ export class GridController implements TileWall {
 
   /** Make the tiles match the grid: existing tiles keep their items and take
    * the new rectangles in order, new cells get items, surplus tiles leave. */
-  private async fill() {
+  /** fills run one after another: two at once (a resize while the queue is
+   * slow) could each put a tile into the same empty cell */
+  private filling: Promise<void> = Promise.resolve();
+  private fill(): Promise<void> {
+    const run = this.filling.then(() => this.fillNow());
+    this.filling = run.catch((e) => console.warn("grid:", e));
+    return run;
+  }
+
+  private async fillNow() {
     const { rects, center } = this.layout();
     this.filter(rects);
     const now = performance.now();
@@ -308,9 +317,10 @@ export class GridController implements TileWall {
     const span = this.spanOf(tile.rect);
     const keep = this.tiles.filter((t) => t.id !== id && !t.leaving && !t.fixed && t.pinned).map((t) => this.spanOf(t.rect));
     if (this.center) {
-      const block = centerBlock(cols, rows, GRID_CENTER_SIZE, this.center.aspect, cell);
-      if (!block) return "with centered media this grid is split finer; turn the center off (C) to change tile sizes";
-      keep.push(block);
+      // the block the layout really uses: gridWithCenter widens it over merges it touches
+      const placed = this.layout().center;
+      if (!centerBlock(cols, rows, GRID_CENTER_SIZE, this.center.aspect, cell) || !placed) return "with centered media this grid is split finer; turn the center off (C) to change tile sizes";
+      keep.push(this.spanOf(placed));
     }
     const { c, r, w, h } = span;
     const sides: GridSpan[] = grow

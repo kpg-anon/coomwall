@@ -86,7 +86,9 @@ pub async fn scan_sources(state: State<'_, AppState>, sources: Vec<String>, recu
     let cache = state.cache.clone();
     let hidden: HashSet<String> = state.hidden.lock().map_err(err)?.iter().map(|p| scan::path_key(p)).collect();
     tauri::async_runtime::spawn_blocking(move || {
-        let cache = cache.lock().map_err(err)?;
+        // a copy: a walk of a large network folder takes a while, and the
+        // walls' remember_dims must not wait for it
+        let cache = cache.lock().map_err(err)?.clone();
         Ok(scan::scan(&sources, recursive, &cache).without(&hidden))
     })
     .await
@@ -199,11 +201,28 @@ pub fn plan_layout(tree: Tree, bounds: Rect) -> Vec<Placed> {
 
 /// Settings are opaque JSON to Rust: the frontend owns their shape and fills
 /// in defaults for anything missing.
+/// A JSON file, or Null when it does not exist. A file that does not parse
+/// is renamed to `<name>.bad-<time>.json` first: the next save would
+/// otherwise replace it and lose everything in it (every saved wall, say).
+pub fn read_json(path: &std::path::Path) -> serde_json::Value {
+    let Ok(bytes) = fs::read(path) else {
+        return serde_json::Value::Null;
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let keep = path.with_file_name(format!("{stem}.bad-{stamp}.json"));
+            eprintln!("coomwall: {} could not be read ({e}); kept as {}", path.display(), keep.display());
+            let _ = fs::rename(path, &keep);
+            serde_json::Value::Null
+        }
+    }
+}
+
 fn read_settings(path: &PathBuf) -> serde_json::Value {
-    fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(serde_json::Value::Null)
+    read_json(path)
 }
 
 #[tauri::command]
@@ -312,4 +331,31 @@ pub fn launch_color(state: State<'_, AppState>) -> String {
 #[tauri::command]
 pub fn restart(app: AppHandle) {
     app.restart()
+}
+
+const MEDIA_EXTS: &[&str] = &["mp4", "m4v", "webm", "mov", "mkv", "ogv", "jpg", "jpeg", "jfif", "png", "webp", "gif", "avif", "bmp"];
+
+/// "Open in default app": a media file or an http(s) link only. The page has
+/// no permission to open paths itself, so nothing it is tricked into asking
+/// for (a .bat, an .exe) can be run.
+#[tauri::command]
+pub fn open_media(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let lower = path.to_ascii_lowercase();
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        return app.opener().open_url(path, None::<&str>).map_err(err);
+    }
+    let ext = std::path::Path::new(&path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !MEDIA_EXTS.contains(&ext.as_str()) {
+        return Err("only media files are opened from the wall".into());
+    }
+    app.opener().open_path(path, None::<&str>).map_err(err)
+}
+
+/// Open the folder where links downloaded with yt-dlp are kept.
+#[tauri::command]
+pub fn open_links_dir(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = crate::ytdl::links_dir(state);
+    app.opener().open_path(dir, None::<&str>).map_err(err)
 }
