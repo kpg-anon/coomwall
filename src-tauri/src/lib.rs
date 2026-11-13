@@ -12,6 +12,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // in-app updates from GitHub releases (src/lib/components/UpdateNotice.svelte)
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Media is served through our own scheme rather than the asset
         // protocol: it answers HTTP Range requests from disk in chunks, so
         // seeking a 10 GB video never reads the whole file into memory.

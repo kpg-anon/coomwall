@@ -17,6 +17,8 @@
     "core:window:allow-destroy",
     "dialog:default",
     "opener:default",
+    "updater:default",
+    "process:default",
     {
       "identifier": "opener:allow-reveal-item-in-dir",
       "allow": [{ "path": "**" }]

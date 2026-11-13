@@ -25,6 +25,7 @@
   import Preferences from "./Preferences.svelte";
   import CenterIcon from "./CenterIcon.svelte";
   import SavedWalls from "./SavedWalls.svelte";
+  import UpdateNotice from "./UpdateNotice.svelte";
 
   let { onstart }: { onstart: () => void } = $props();
 
@@ -1041,6 +1042,7 @@
   </div>
 
   {#if prefs}<Preferences onclose={() => (prefs = false)} />{/if}
+  <UpdateNotice />
   {#if showSaved}
     <SavedWalls {saved} {monitors} busy={resuming} onload={resume} ondelete={deleteSession} onclose={() => (showSaved = false)} />
   {/if}

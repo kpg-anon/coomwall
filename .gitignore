@@ -27,3 +27,8 @@ vite.config.js.timestamp-*
 # marketing video project (local-only; the screenshots it renders are
 # committed in screenshots/)
 /marketing/
+
+# Updater signing key + passphrase: NEVER commit (the public key is in tauri.conf.json)
+/.tauri-updater.key
+/.tauri-updater.key.pub
+/.tauri-updater.pass

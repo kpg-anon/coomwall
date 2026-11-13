@@ -79,6 +79,8 @@ export interface Settings {
   stackLinkMode: LinkMode;
   /** yt-dlp: the browser whose cookies it may read */
   ytdlCookies: Cookies;
+  /** look for a newer release on GitHub when the app starts */
+  autoUpdateCheck: boolean;
   /** Ribbon: rows */
   rows: number;
   /** Cascade: columns */
@@ -219,6 +221,7 @@ export const DEFAULTS: Settings = {
   stackItem: "",
   stackLinkMode: "stream",
   ytdlCookies: "",
+  autoUpdateCheck: true,
   rows: 2,
   columns: 4,
   ribbonDir: "left",

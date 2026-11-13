@@ -29,7 +29,7 @@
   let tab = $state<Tab>(lastTab);
 
   /** what "Restore defaults" puts back: everything in this dialog */
-  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies"] as const;
+  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
   let winH = $state(800);
   const changedAny = $derived(PREF_KEYS.some((k) => JSON.stringify(s[k]) !== JSON.stringify(DEFAULTS[k])));
 
@@ -148,6 +148,13 @@
               <input type="checkbox" bind:checked={s.alwaysOnTop} /><span title="The wall stays above every other window, even one you click on. T on the wall turns it on or off.">Keep the wall above other windows <kbd>T</kbd></span>
             </label>
             <span class="note">Off: another program you bring to the front stays in front of the wall.</span>
+          </section>
+          <section>
+            <span class="sec-title">Updates</span>
+            <label class="check">
+              <input type="checkbox" bind:checked={s.autoUpdateCheck} /><span title="When coomwall starts, it asks GitHub whether a newer release exists and offers it with its changelog. Nothing is downloaded until you choose Update now.">Check for updates when coomwall starts</span>
+            </label>
+            <span class="note">An update shows its changelog first; Update now downloads it, installs it and restarts.</span>
           </section>
         {:else if tab === "behavior"}
           <section>

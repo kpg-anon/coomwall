@@ -4,7 +4,13 @@
 
 # coomwall
 
-**Point it at folders of images and videos. Pick a mode. Everything plays at once, on one screen.**
+**Point it at folders of images and videos. Pick a mode. Everything plays at once, on every screen.**
+
+<a href="https://github.com/kpg-anon/coomwall/releases/latest"><img src="https://img.shields.io/badge/version-1.0.0-c287ff?style=flat-square" alt="Version 1.0.0"></a>
+<img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-57c7e3?style=flat-square" alt="Windows 10 and 11">
+<img src="https://img.shields.io/badge/license-MIT-82d65a?style=flat-square" alt="MIT licence">
+
+**[Download the installer](https://github.com/kpg-anon/coomwall/releases/latest)** · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -209,7 +215,17 @@ WebView2 (Chromium) converts every color to the display's color profile. On a wi
 
 A change needs a restart; the setup screen offers one. On an sRGB display the two are the same.
 
-## Install / build
+## Install
+
+Download `coomwall_<version>_x64-setup.exe` (or the `.msi`) from the [latest release](https://github.com/kpg-anon/coomwall/releases/latest) and run it. Windows 10 and 11; the WebView2 runtime it needs is part of Windows 11 and is installed by the setup on Windows 10 if missing. The installers are not code-signed, so SmartScreen may ask once (More info → Run anyway).
+
+For links (Stack, and page links in playlists): [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH (`winget install yt-dlp`), and ffmpeg for downloads above 360p.
+
+### Updating
+
+coomwall checks for a newer release when it starts (Preferences → General → **Check for updates when coomwall starts**). When there is one, a notice shows its changelog; **Update now** downloads it, installs it and restarts. Your settings and saved walls are kept.
+
+## Build from source
 
 Requirements: Node 20+, Rust stable, and on Windows the WebView2 runtime (already part of Windows 11). For links in Stack and in playlists: yt-dlp on PATH, and ffmpeg for downloads.
 
