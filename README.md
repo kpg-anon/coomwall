@@ -8,6 +8,8 @@
 
 </div>
 
+<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/hero.jpg" alt="coomwall: six modes, one wall" width="880"></p>
+
 ---
 
 ## What it is
@@ -25,7 +27,13 @@ It is the GUI successor to `coomplexer grid --mix`. That tool tiled one mpv wind
 | **Cascade** | Columns that travel up (or down), like a slow feed. |
 | **Dynamic** | On a clock (every 1.5–15 s) a new item arrives and the whole wall is laid out again. Tiles are not one size: the newest item gets the largest tile, the next few are in between, and tiles shrink as they age. **Focus** sets how strong that is; at 0 all tiles are alike. |
 | **Grid** | Equal cells that never move, like `coomplexer grid -g 3x1`: pick 2×1, 3×1, 2×2 …, type `5x2`, or merge cells into larger tiles yourself. Items either fill their tile or are shown whole. |
-You can switch modes from the wall with `1`–`5`. The shuffle carries on where it was.
+| **Stack** | One item repeated in 1–6 panes side by side or one above the next, like `coomplexer stack`: every pane shows the same frame. It plays your sources one after another, or one file or link that loops. A link (YouTube and any site yt-dlp knows) is streamed straight from the site or downloaded first. See [Stack](#stack). |
+
+You can switch modes from the wall with `1`–`6`. The order carries on where it was.
+
+<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/mosaic.jpg" alt="Mosaic: one block changes at a time" width="880"></p>
+
+<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/stack.jpg" alt="Stack: one item in three panes, zoomed with Shift+wheel" width="880"></p>
 
 Any mode can also have **centered media**: one file that plays in the middle at its own shape and never moves. It is always part of the wall, never on top of it: the other media fill the screen around it with no gaps. See [Centered media](#centered-media).
 
@@ -33,7 +41,7 @@ Any mode can also have **centered media**: one file that plays in the middle at 
 
 1. **Add sources.** Drop folders or `.m3u` playlists on the window, or click to choose. Subfolders are included unless you turn that off. Hidden folders such as comfysort's `.trash` are skipped.
 2. **Pick what to show** (next to the sources): everything, videos only or images only, and any shape, portrait only or landscape only.
-3. **Pick a mode** and its numbers: tiles and stillness for Mosaic, rows or columns plus direction and speed for the feeds, the layout for Grid. In the right-hand column, turn on **Centered media** and choose its file and size if you want one. Show and Shape (what to show) are at the top of that column.
+3. **Pick a mode** and its numbers: tiles and stillness for Mosaic, rows or columns plus direction and speed for the feeds, the layout for Grid, panes and a file or link for Stack. In the right-hand column, turn on **Centered media** and choose its file and size if you want one. What to show is at the top of that column: **Show** (videos, images or both), **Shape** (portrait or landscape only), **Size** (skip files whose shorter side is under 480, 720 or 1080 px) and **Order** (shuffle, newest first by file date, or folder order).
 4. **Start the wall** with `Enter`. It goes fullscreen on the display you chose. `Esc` comes back.
 
 ### Grid layouts
@@ -41,6 +49,22 @@ Any mode can also have **centered media**: one file that plays in the middle at 
 Under the Grid card: one-click presets (columns × rows), a box that takes `5x2`, sliders for columns (1–8) and rows (1–6), and a drawing of the grid. Drag across cells in the drawing to merge them into one tile; click a merged tile to split it. On the wall, `+` `−` change the columns and `↑` `↓` the rows.
 
 **Only media that fits the cells** (with "Fills its tile") uses only files whose shape fits the cells, so nothing is cut off more than a little. How close is a preference (cog → Grid): **Automatic** (exact shape on a 16:9 screen, up to 12% cut on any other), **Exact shape**, or **Up to 12% cut**. On a 16:9 screen a 3×3 grid has 16:9 cells, so 16:9 video fits exactly; on a 16:10 screen the cells are 1.6:1 and 16:9 video loses about 10%. Setup shows how many of your files fit before you start; if none do, the wall says so. Mosaic's **Crop limit** does not apply to Grid.
+
+### Stack
+
+One item in 1–6 panes (`+` `−` on the wall). The item is decoded once and every pane is drawn from it, so the copies never drift apart.
+
+- **Direction:** a row, a column, or Auto (whichever shows the item larger on that display). `D` on the wall switches.
+- **Turn:** 0, 90 or 270 degrees, for a display on its side. `R` on the wall.
+- **Each pane:** *Fills the screen* (the panes share the whole display and crop the item; the default) or *Shown whole* (each pane has the item's shape, with bars around the stack).
+- **Plays:** *One file or link* (it loops) or *From the sources* (one item after another, the one that fills the display best first; `N` `B` step, `P` keeps one).
+- **Links:** paste a page link. **Stream** plays it straight from the site: yt-dlp finds the stream URLs, nothing is saved, and the sound stream is kept in step with the picture. **Download first** saves it once into the app's cache (Preferences → System shows the size and clears it). A stream that expires while the wall runs is fetched again where it was. Live streams are not supported yet.
+- Shift+wheel zooms into every pane at once, toward the pointer; Shift+drag moves the picture; Shift+double-click puts it back.
+- Right-click → **Stack it** on any item in another mode switches to Stack with that item, then carries on with the sources.
+
+yt-dlp must be on PATH (`winget install yt-dlp` or `scoop install yt-dlp`), and ffmpeg for downloads above 360p on YouTube (streaming does not need it). Preferences → System says whether both are found. For links that need a login, yt-dlp can read your browser's cookies (Preferences → System); on Windows only Firefox works reliably while the browser is open.
+
+Playlists can hold page links too (for example the ones `coomplexer scrape` writes). In any mode, such a link plays through yt-dlp the same way, two being looked up at a time.
 
 ### Centered media
 
@@ -89,13 +113,18 @@ Tick **Display N has its own folders** (under Sources) to give a display its own
 
 ### Resuming a wall
 
+<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/saved.jpg" alt="The saved walls drawer: a drawing of each display's tiles" width="880"></p>
+
+
 A running wall saves what it shows every 10 seconds and when it closes. **Resume**, beside Start, opens the last wall again as it was: the same mode and settings, the same files in the same tiles (Mosaic and Dynamic in the same arrangement, Grid in the same cells, each Ribbon or Cascade lane with the items it had, in order), pinned tiles still pinned, moved pictures (`Shift`+drag) where they were, sound on the same items, and each video from the second it had reached. Hovering Resume says when it was saved and what it holds. **Start** always opens a fresh wall.
 
-`Ctrl`+`S` on a wall saves it under a name. **Saved walls**, beside Start, lists those saves with the time and what each holds; **Load** opens one, the bin deletes it.
+`Ctrl`+`S` on a wall saves it under a name. **Saved walls**, beside Start, opens a panel at the right with the last wall and every save: its name and time, a drawing of each display's tiles as they were (pinned tiles outlined, centered media in orange), the mode and its numbers, filters, centered file and sources. **Load** (or **Resume**) opens one; the bin deletes it after asking.
 
 - A file that is no longer there (moved, deleted, hidden with Never show again, or left out by Show, Shape or the maximum video length) is replaced by another file, and the wall says how many. In Mosaic and Dynamic the remaining files are then laid out afresh, so the arrangement can differ.
 - With a wall on each display, every display's wall is saved and comes back on its display. A display that is not connected is left out, and the walls say so; if none of them is connected, the first saved wall opens on the setup window's display.
 - Not saved: what each tile showed before (`B`), pause, the viewer, and how far each Ribbon or Cascade lane had moved, beyond the first item.
+
+<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/walls.jpg" alt="A wall on each display, each in its own mode" width="880"></p>
 
 ### Walls and other windows
 
@@ -107,7 +136,7 @@ If you want the walls above everything else, turn on **Keep the wall above other
 
 **Show in Explorer**, **Open in default app**, **Make it the centered media**, **Previous item** and **Next item** (in a tile of Mosaic, Dynamic or Grid, like `B` and `N`), **Remove from wall** (gone until you go back to setup) and **Never show again**. Never show again saves the file to a list that scanning skips; setup shows how many files are hidden, and you can unhide them one by one or all at once.
 
-The right-hand column also holds playback speed, image duration, a maximum video length (up to 10 minutes; longer videos are skipped in every mode; 0 = no limit), looping short clips, gap, crop limit and shuffle. The cog at the top right opens **Preferences**, in tabs (General, Behavior, Keyboard, Grid, System): theme, what happens under the pointer, when the wall pauses by itself, controls hide time, volume, keeping the wall on top, graphics adapter, color, the speed keys, and a list of every key. Every setting is remembered. Hovering a setting's name (dotted underline) shows what it does. A slider or choice that is not at its default shows a small ↺ beside it that puts the default back, and Preferences has **Restore defaults** for everything in it.
+The right-hand column also holds playback speed, image duration, a maximum video length (up to 10 minutes; longer videos are skipped in every mode; 0 = no limit), looping short clips, gap and crop limit. The cog at the top right opens **Preferences**, in tabs (General, Behavior, Keyboard, Grid, System): theme, what happens under the pointer, when the wall pauses by itself, controls hide time, volume, keeping the wall on top, graphics adapter, color, the speed keys, and a list of every key. Every setting is remembered. Hovering a setting's name (dotted underline) shows what it does. A slider or choice that is not at its default shows a small ↺ beside it that puts the default back, and Preferences has **Restore defaults** for everything in it.
 
 Everything on the setup page has a fixed place: picking another mode changes only what is in the mode's settings box, never where anything else is. In a larger window the cards and that box grow; at the default 1180×820 everything fits without scrolling. The version is shown next to the name.
 
@@ -116,26 +145,27 @@ Everything on the setup page has a fixed place: picking another mode changes onl
 | Key | Does |
 | --- | --- |
 | `Space` | pause or resume this wall · with `Shift`, every wall |
-| `1`–`5` | Mosaic · Ribbon · Cascade · Dynamic · Grid |
-| `+` `−` | one more or one fewer tile, row or column |
+| `1`–`6` | Mosaic · Ribbon · Cascade · Dynamic · Grid · Stack |
+| `+` `−` | one more or one fewer tile, row, column or Stack pane |
 | `↑` `↓` | feed speed · Dynamic: how often · Grid: rows · Mosaic: the center item's size |
-| `Shift` `↑` `↓` | the center item's size, in any mode |
-| `D` | reverse the feed's direction |
+| `Shift` `↑` `↓` | the pinned tile under the pointer one step larger or smaller (Mosaic and Dynamic move the two cuts around it, so only its neighbors make room; Grid gives it a row or column of cells more or less), else the center item's size, in any mode |
+| `D` | reverse the feed's direction · Stack: row or column |
 | `[` `]` | playback speed, slower or faster through 1× 0.8× 0.5× 0.4× (round past either end); `Shift` moves by 0.05. Under Preferences → **Speed keys** the list can be changed, or set to 0.05 steps (`Shift` 0.25) |
-| `N` | next item in the tile under the pointer · after `B`, forward again to where it was |
-| `B` | the item that tile showed before (Mosaic, Dynamic, Grid); each tile remembers its last 20 |
-| `P` | pin it: it keeps playing, and no other change moves it |
-| `Shift`+drag | move the picture inside a pinned tile or the center tile (Mosaic, Dynamic, Grid), when the tile crops it · `Shift`+double-click centers it again. The position is kept until the tile shows another item |
+| `N` | next item in the tile under the pointer · after `B`, forward again to where it was · Stack: the next item |
+| `B` | the item that tile showed before (Mosaic, Dynamic, Grid); each tile remembers its last 20 · Stack: the item before |
+| `P` | pin it: it keeps playing, and no other change moves it · Stack: it loops |
+| `Shift`+wheel | zoom into a pinned tile or the center tile (Mosaic, Dynamic, Grid) or into Stack's panes, toward the pointer, up to 8× |
+| `Shift`+drag | move the picture inside a pinned tile or the center tile, when it is cropped or zoomed · `Shift`+double-click centers it and drops the zoom. Position and zoom are kept until the tile shows another item, and saved with the wall |
 | `M` | sound on or off for the item under the pointer; any number of items can have sound |
 | `Shift` `M` | sound off for every item, on every wall |
 | `F`, double-click | view it whole: zoom and pan |
 | `C` | play it in the center · on the center item, or with nothing under the pointer: center off or on |
 | `O` | show the file in Explorer |
-| right-click | Show in Explorer · Open in default app · Make it the centered media · Previous item · Next item · Remove from wall · Never show again |
+| right-click | Show in Explorer · Open in default app · Make it the centered media · Stack it · Previous item · Next item · Remove from wall · Never show again |
 | `T` | keep the walls above every other window, or stop |
 | `Ctrl` `Shift` `←` `→` `↑` `↓` | move this wall to the display on that side; a wall there swaps with it |
 | `Ctrl` `S` | save the wall under a name (a field opens with the date and time; `Enter` saves, `Esc` cancels). With a wall on each display, every wall is saved together. Saving under a name already used replaces that save |
-| `R` | lay the wall out again · Grid: new items · feeds: refill |
+| `R` | lay the wall out again · Grid: new items · feeds: refill · Stack: turn the panes |
 | `G` | outline each Mosaic change as it happens |
 | `?` | all keys |
 | `Esc` | back to setup |
@@ -181,7 +211,7 @@ A change needs a restart; the setup screen offers one. On an sRGB display the tw
 
 ## Install / build
 
-Requirements: Node 20+, Rust stable, and on Windows the WebView2 runtime (already part of Windows 11).
+Requirements: Node 20+, Rust stable, and on Windows the WebView2 runtime (already part of Windows 11). For links in Stack and in playlists: yt-dlp on PATH, and ffmpeg for downloads.
 
 ```console
 npm install
