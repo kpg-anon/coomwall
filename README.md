@@ -14,7 +14,7 @@
 
 </div>
 
-<p align="center"><img src="screenshots/hero.jpg" alt="coomwall: six modes, one wall" width="880"></p>
+https://github.com/user-attachments/assets/8cc377f5-61e9-435d-beea-2c87c729c7bd
 
 ---
 
@@ -242,14 +242,7 @@ On the windows-gnu toolchain the first `tauri build` needs `WebView2Loader.dll` 
 
 **Graphics** (Preferences, under System) picks the GPU that decodes and composites everything: the Windows default (for WebView2 that is the power-saving one), High performance or Power saving. It is passed to WebView2 as `--use-adapter-luid`, so a change needs a restart; the setup screen offers one.
 
-On a hybrid laptop the displays are wired to the integrated GPU, and with High performance every frame is copied across to it. Measured on an XPS 17 9730 (Iris Xe + RTX 4070 Laptop), Ribbon with 4 rows of 1080p60 clips:
-
-| Wall on | Windows default (Iris Xe) | High performance (RTX 4070) |
-| --- | --- | --- |
-| 1920×1200 external monitor | 36% of frames dropped, 34 fps | 6% dropped, 59 fps |
-| 3840×2400 built-in panel | 37% dropped, 35 fps | videos played at about 5% speed |
-
-With High performance, a Ribbon of 4 rows on that panel stops most videos on one frame: the RTX copy engine runs at 77% and Chromium logs `DECODER_UNDERFLOW` without an error. On Windows default the same wall plays (Iris Xe decode 31%). The wall now notices: when several visible videos have had no new frame for 4 s, the HUD says how many and points to the Graphics setting.
+On a laptop with two GPUs the displays are usually wired to the integrated one. With High performance, every frame is then copied across to it, and on a high-resolution built-in panel with many videos playing that copy can become the limit: videos stop on one frame while Chromium reports no error. The wall notices this. When several visible videos have had no new frame for 4 s, the HUD says how many and points to the Graphics setting; Windows default avoids the copy. On an external monitor, High performance usually plays more videos smoothly.
 
 ### Formats
 

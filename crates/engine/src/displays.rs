@@ -72,30 +72,30 @@ pub fn neighbor(screens: &[Screen], from: usize, dir: Dir) -> Option<usize> {
 mod tests {
     use super::*;
 
-    // this machine: a 3840x2400 panel with two 1920x1200 monitors side by side above it
-    fn xps() -> Vec<Screen> {
+    // a laptop panel with two monitors side by side above it
+    fn panel_and_two_above() -> Vec<Screen> {
         vec![
-            Screen { x: 0, y: 0, w: 3840, h: 2400 },
-            Screen { x: 5, y: -1200, w: 1920, h: 1200 },
-            Screen { x: 1925, y: -1200, w: 1920, h: 1200 },
+            Screen { x: 0, y: 0, w: 2560, h: 1440 },
+            Screen { x: 5, y: -720, w: 1280, h: 720 },
+            Screen { x: 1285, y: -720, w: 1280, h: 720 },
         ]
     }
 
     #[test]
     fn side_by_side_and_stacked() {
-        let s = xps();
+        let s = panel_and_two_above();
         assert_eq!(neighbor(&s, 1, Dir::Right), Some(2));
         assert_eq!(neighbor(&s, 2, Dir::Left), Some(1));
         assert_eq!(neighbor(&s, 1, Dir::Down), Some(0));
         assert_eq!(neighbor(&s, 2, Dir::Down), Some(0));
-        // both monitors touch the panel's top edge; the panel's centre (x 1920)
-        // is 955 px from monitor 2's (x 965) and 965 px from monitor 3's (x 2885)
+        // both monitors touch the panel's top edge; the panel's centre (x 1280)
+        // is 635 px from monitor 2's (x 645) and 645 px from monitor 3's (x 1925)
         assert_eq!(neighbor(&s, 0, Dir::Up), Some(1));
     }
 
     #[test]
     fn nothing_that_way() {
-        let s = xps();
+        let s = panel_and_two_above();
         assert_eq!(neighbor(&s, 0, Dir::Left), None);
         assert_eq!(neighbor(&s, 0, Dir::Right), None);
         assert_eq!(neighbor(&s, 0, Dir::Down), None);

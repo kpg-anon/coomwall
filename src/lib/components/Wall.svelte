@@ -820,8 +820,8 @@
   // A video that should be playing but has had no new frame for 4 s, with its
   // data already loaded (readyState below HAVE_FUTURE_DATA). Chromium logs
   // this as DECODER_UNDERFLOW and raises no error, so the wall checks for it:
-  // on this laptop it is what the RTX 4070 does when its frames must be copied
-  // to the Iris Xe that drives the built-in panel.
+  // on a laptop it is what a discrete GPU does when its frames must be copied
+  // to the integrated GPU that drives the built-in panel.
   const lastFrame = new WeakMap<HTMLVideoElement, { t: number; at: number }>();
   let stallSamples = 0;
   let clearSamples = 0;
