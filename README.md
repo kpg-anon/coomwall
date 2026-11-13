@@ -37,13 +37,26 @@ It is the GUI successor to `coomplexer grid --mix`. That tool tiled one mpv wind
 
 You can switch modes from the wall with `1`–`6`. The order carries on where it was.
 
-<p align="center"><img src="screenshots/mosaic.jpg" alt="Mosaic: one block changes at a time" width="880"></p>
+<p align="center"><img src="screenshots/app-mosaic.jpg" alt="A Mosaic wall with the controls showing; the large tile is pinned and zoomed in" width="880"></p>
 
-<p align="center"><img src="screenshots/stack.jpg" alt="Stack: one item in three panes, zoomed with Shift+wheel" width="880"></p>
+<p align="center"><img src="screenshots/app-stack.jpg" alt="Stack: one portrait clip in three panes, all on the same frame" width="880"></p>
+
+<table>
+<tr>
+<td><img src="screenshots/app-grid.jpg" alt="Grid 5×5 with a centered video built into the middle"></td>
+<td><img src="screenshots/app-ribbon.jpg" alt="Ribbon: three rows gliding left, every item at its own shape"></td>
+</tr>
+<tr>
+<td align="center">Grid 5×5 with centered media</td>
+<td align="center">Ribbon, three rows</td>
+</tr>
+</table>
 
 Any mode can also have **centered media**: one file that plays in the middle at its own shape and never moves. It is always part of the wall, never on top of it: the other media fill the screen around it with no gaps. See [Centered media](#centered-media).
 
 ## Using it
+
+<p align="center"><img src="screenshots/app-setup.jpg" alt="The setup screen: sources, the six modes, Grid's layout editor, filters and playback settings" width="760"></p>
 
 1. **Add sources.** Drop folders or `.m3u` playlists on the window, or click to choose. Subfolders are included unless you turn that off. Hidden folders such as comfysort's `.trash` are skipped.
 2. **Pick what to show** (next to the sources): everything, videos only or images only, and any shape, portrait only or landscape only.
@@ -119,7 +132,7 @@ Tick **Display N has its own folders** (under Sources) to give a display its own
 
 ### Resuming a wall
 
-<p align="center"><img src="screenshots/saved.jpg" alt="The saved walls drawer: a drawing of each display's tiles" width="880"></p>
+<p align="center"><img src="screenshots/app-saved.jpg" alt="The saved walls panel: each save with a drawing of its tiles" width="880"></p>
 
 
 A running wall saves what it shows every 10 seconds and when it closes. **Resume**, beside Start, opens the last wall again as it was: the same mode and settings, the same files in the same tiles (Mosaic and Dynamic in the same arrangement, Grid in the same cells, each Ribbon or Cascade lane with the items it had, in order), pinned tiles still pinned, moved pictures (`Shift`+drag) where they were, sound on the same items, and each video from the second it had reached. Hovering Resume says when it was saved and what it holds. **Start** always opens a fresh wall.
@@ -130,7 +143,8 @@ A running wall saves what it shows every 10 seconds and when it closes. **Resume
 - With a wall on each display, every display's wall is saved and comes back on its display. A display that is not connected is left out, and the walls say so; if none of them is connected, the first saved wall opens on the setup window's display.
 - Not saved: what each tile showed before (`B`), pause, the viewer, and how far each Ribbon or Cascade lane had moved, beyond the first item.
 
-<p align="center"><img src="screenshots/walls.jpg" alt="A wall on each display, each in its own mode" width="880"></p>
+<p align="center"><img src="screenshots/walls.jpg" alt="Illustration: a wall on each display, each in its own mode" width="880"></p>
+<p align="center"><sub>Illustration: three displays, each with its own mode.</sub></p>
 
 ### Walls and other windows
 
@@ -143,6 +157,8 @@ If you want the walls above everything else, turn on **Keep the wall above other
 **Show in Explorer**, **Open in default app**, **Make it the centered media**, **Previous item** and **Next item** (in a tile of Mosaic, Dynamic or Grid, like `B` and `N`), **Remove from wall** (gone until you go back to setup) and **Never show again**. Never show again saves the file to a list that scanning skips; setup shows how many files are hidden, and you can unhide them one by one or all at once.
 
 The right-hand column also holds playback speed, image duration, a maximum video length (up to 10 minutes; longer videos are skipped in every mode; 0 = no limit), looping short clips, gap and crop limit. The cog at the top right opens **Preferences**, in tabs (General, Behavior, Keyboard, Grid, System): theme, what happens under the pointer, when the wall pauses by itself, controls hide time, volume, keeping the wall on top, graphics adapter, color, the speed keys, and a list of every key. Every setting is remembered. Hovering a setting's name (dotted underline) shows what it does. A slider or choice that is not at its default shows a small ↺ beside it that puts the default back, and Preferences has **Restore defaults** for everything in it.
+
+<p align="center"><img src="screenshots/app-preferences.jpg" alt="Preferences, Keyboard tab: the speed keys and every key on the wall" width="760"></p>
 
 Everything on the setup page has a fixed place: picking another mode changes only what is in the mode's settings box, never where anything else is. In a larger window the cards and that box grow; at the default 1180×820 everything fits without scrolling. The version is shown next to the name.
 

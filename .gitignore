@@ -23,6 +23,7 @@ vite.config.js.timestamp-*
 # Local test data: the CW_DATA_DIR profile (generated test media lives in
 # docs/testmedia/, gitignored with docs/)
 /.devdata/
+/.devdata-shots/
 
 # marketing video project (local-only; the screenshots it renders are
 # committed in screenshots/)

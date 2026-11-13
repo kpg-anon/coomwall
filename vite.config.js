@@ -15,6 +15,6 @@ export default defineConfig(async () => ({
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1431 } : undefined,
     // .devdata holds a running WebView2 profile whose locked files crash the watcher
-    watch: { ignored: ["**/src-tauri/**", "**/.devdata/**", "**/testmedia/**", "**/docs/**"] },
+    watch: { ignored: ["**/src-tauri/**", "**/.devdata*/**", "**/testmedia/**", "**/docs/**"] },
   },
 }));
