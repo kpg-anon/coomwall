@@ -14,7 +14,7 @@
 
 </div>
 
-<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/hero.jpg" alt="coomwall: six modes, one wall" width="880"></p>
+<p align="center"><img src="screenshots/hero.jpg" alt="coomwall: six modes, one wall" width="880"></p>
 
 ---
 
@@ -37,9 +37,9 @@ It is the GUI successor to `coomplexer grid --mix`. That tool tiled one mpv wind
 
 You can switch modes from the wall with `1`–`6`. The order carries on where it was.
 
-<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/mosaic.jpg" alt="Mosaic: one block changes at a time" width="880"></p>
+<p align="center"><img src="screenshots/mosaic.jpg" alt="Mosaic: one block changes at a time" width="880"></p>
 
-<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/stack.jpg" alt="Stack: one item in three panes, zoomed with Shift+wheel" width="880"></p>
+<p align="center"><img src="screenshots/stack.jpg" alt="Stack: one item in three panes, zoomed with Shift+wheel" width="880"></p>
 
 Any mode can also have **centered media**: one file that plays in the middle at its own shape and never moves. It is always part of the wall, never on top of it: the other media fill the screen around it with no gaps. See [Centered media](#centered-media).
 
@@ -119,7 +119,7 @@ Tick **Display N has its own folders** (under Sources) to give a display its own
 
 ### Resuming a wall
 
-<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/saved.jpg" alt="The saved walls drawer: a drawing of each display's tiles" width="880"></p>
+<p align="center"><img src="screenshots/saved.jpg" alt="The saved walls drawer: a drawing of each display's tiles" width="880"></p>
 
 
 A running wall saves what it shows every 10 seconds and when it closes. **Resume**, beside Start, opens the last wall again as it was: the same mode and settings, the same files in the same tiles (Mosaic and Dynamic in the same arrangement, Grid in the same cells, each Ribbon or Cascade lane with the items it had, in order), pinned tiles still pinned, moved pictures (`Shift`+drag) where they were, sound on the same items, and each video from the second it had reached. Hovering Resume says when it was saved and what it holds. **Start** always opens a fresh wall.
@@ -130,7 +130,7 @@ A running wall saves what it shows every 10 seconds and when it closes. **Resume
 - With a wall on each display, every display's wall is saved and comes back on its display. A display that is not connected is left out, and the walls say so; if none of them is connected, the first saved wall opens on the setup window's display.
 - Not saved: what each tile showed before (`B`), pause, the viewer, and how far each Ribbon or Cascade lane had moved, beyond the first item.
 
-<p align="center"><img src="https://raw.githubusercontent.com/kpg-anon/coomwall/main/screenshots/walls.jpg" alt="A wall on each display, each in its own mode" width="880"></p>
+<p align="center"><img src="screenshots/walls.jpg" alt="A wall on each display, each in its own mode" width="880"></p>
 
 ### Walls and other windows
 
