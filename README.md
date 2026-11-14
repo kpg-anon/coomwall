@@ -10,7 +10,7 @@
 <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-57c7e3?style=flat-square" alt="Windows 10 and 11">
 <img src="https://img.shields.io/badge/license-MIT-82d65a?style=flat-square" alt="MIT licence">
 
-**[Download the installer](https://github.com/kpg-anon/coomwall/releases/latest)** · [Changelog](CHANGELOG.md)
+**[Download](https://github.com/kpg-anon/coomwall/releases/latest)** (installer or portable zip) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -233,13 +233,25 @@ A change needs a restart; the setup screen offers one. On an sRGB display the tw
 
 ## Install
 
-Download `coomwall_<version>_x64-setup.exe` (or the `.msi`) from the [latest release](https://github.com/kpg-anon/coomwall/releases/latest) and run it. Windows 10 and 11; the WebView2 runtime it needs is part of Windows 11 and is installed by the setup on Windows 10 if missing. The installers are not code-signed, so SmartScreen may ask once (More info → Run anyway).
+Each [release](https://github.com/kpg-anon/coomwall/releases/latest) has three downloads for Windows 10 and 11 (x64):
+
+| File | What it is |
+|:--|:--|
+| `coomwall_<version>_x64-setup.exe` | **Recommended.** Installs for your user account, with a Start menu entry and an uninstaller. This is the one that updates itself: coomwall offers each new release and installs it in one click. |
+| `coomwall_<version>_x64-portable.zip` | No install. Unzip it anywhere and run `coomwall.exe`. Settings, saved walls and the cache stay in the `coomwall-data` folder next to it. It does not update itself; see [Updating](#updating). |
+| `coomwall_<version>_x64_en-US.msi` | For managed or silent installs (`msiexec /i … /qn`). Installs for all users. For automatic updates use `setup.exe` instead: the in-app updater runs the `setup.exe` installer. |
+
+If you want coomwall to stay up to date without thinking about it, use `setup.exe`.
+
+The WebView2 runtime coomwall needs is part of Windows 11 and current Windows 10. The installers download it if it is missing; the portable zip cannot, so on a system without it install it from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) first. The downloads are not code-signed, so SmartScreen may ask once (More info → Run anyway).
 
 For links (Stack, and page links in playlists): [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH (`winget install yt-dlp`), and ffmpeg for downloads above 360p.
 
 ### Updating
 
 coomwall checks for a newer release when it starts (Preferences → General → **Check for updates when coomwall starts**). When there is one, a notice shows its changelog; **Update now** downloads it, installs it and restarts. Your settings and saved walls are kept.
+
+The portable copy shows the same notice with **Download zip** instead. To update it, replace `coomwall.exe` and `WebView2Loader.dll` with the ones from the new zip and keep the `coomwall-data` folder.
 
 ## Build from source
 

@@ -36,7 +36,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
-        let (config, cache_dir) = match dev_data_dir() {
+        let (config, cache_dir) = match data_dir() {
             Some(dir) => (dir.join("config"), dir.join("cache")),
             None => (app.path().app_config_dir()?, app.path().app_cache_dir()?),
         };
@@ -65,16 +65,34 @@ impl AppState {
     }
 }
 
-/// dev only: CW_DATA_DIR keeps settings, the dimension cache and the WebView2
-/// profile under one folder, so test runs never touch the installed app's data
-pub fn dev_data_dir() -> Option<PathBuf> {
+/// The folder that holds settings, saved walls, the dimension cache and the
+/// WebView2 profile when they are not in the per-user app folders:
+/// - dev only: CW_DATA_DIR, so test runs never touch the installed app's data;
+/// - a portable copy: `coomwall-data` beside the exe (the portable zip ships it),
+///   so the whole app travels in one folder.
+pub fn data_dir() -> Option<PathBuf> {
     #[cfg(debug_assertions)]
     if let Ok(dir) = std::env::var("CW_DATA_DIR") {
         if !dir.is_empty() {
             return Some(std::path::absolute(dir).ok()?);
         }
     }
-    None
+    portable_dir()
+}
+
+pub const PORTABLE_DIR: &str = "coomwall-data";
+
+fn portable_dir() -> Option<PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.join(PORTABLE_DIR);
+    dir.is_dir().then_some(dir)
+}
+
+/// A portable copy must not run the NSIS installer on update: it would install
+/// coomwall elsewhere and leave this folder as it was. The update notice offers
+/// the new portable zip instead.
+#[tauri::command]
+pub fn is_portable() -> bool {
+    portable_dir().is_some()
 }
 
 fn err(e: impl std::fmt::Display) -> String {

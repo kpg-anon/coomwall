@@ -68,7 +68,7 @@ pub fn run() {
             println!("coomwall: browser args: {args}");
             cfg.additional_browser_args = Some(args);
             app.manage(state);
-            let data_dir = commands::dev_data_dir().map(|dir| {
+            let data_dir = commands::data_dir().map(|dir| {
                 println!("coomwall: data dir: {}", dir.display());
                 dir.join("webview")
             });
@@ -92,6 +92,7 @@ pub fn run() {
             commands::plan_reflow,
             commands::plan_center,
             commands::plan_layout,
+            commands::is_portable,
             commands::get_settings,
             commands::set_settings,
             commands::patch_settings,

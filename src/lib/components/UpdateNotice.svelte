@@ -2,10 +2,12 @@
   // "Update available": checks the latest GitHub release on launch (setting
   // autoUpdateCheck), shows its notes (the CHANGELOG section scripts/release.ps1
   // puts in latest.json) as a structured, scrollable changelog, and installs
-  // and restarts on "Update now". Same as comfysort's, without its portable
-  // build path. Shown on the setup screen only, never over a running wall.
+  // and restarts on "Update now". A portable copy gets "Download zip" instead,
+  // because the installer would not update its folder. Shown on the setup
+  // screen only, never over a running wall.
   import { onMount } from "svelte";
   import { settings } from "$lib/settings.svelte";
+  import { api } from "$lib/api";
 
   type Phase = "idle" | "available" | "downloading" | "ready" | "error";
   let phase: Phase = $state("idle");
@@ -14,6 +16,7 @@
   let progress = $state(0); // 0..100
   let errorMsg = $state("");
   let dismissed = $state(false);
+  let portable = $state(false);
   // The Update handle from the updater plugin (kept untyped to avoid pulling the
   // plugin's types into the SSR/prerender pass; this app is SPA-only anyway).
   let update: any = null;
@@ -35,9 +38,10 @@ Full changelog: https://github.com/kpg-anon/coomwall/blob/main/CHANGELOG.md`;
     // devtools console and call `__previewUpdate()` (or `__previewUpdate({ portable: true })`).
     // Gated on import.meta.env.DEV, so it's stripped from production builds.
     if (import.meta.env.DEV) {
-      (window as unknown as Record<string, unknown>).__previewUpdate = () => {
+      (window as unknown as Record<string, unknown>).__previewUpdate = (opts?: { portable?: boolean }) => {
         version = "9.9.9";
         notes = SAMPLE_NOTES;
+        portable = opts?.portable ?? false;
         progress = 0;
         errorMsg = "";
         dismissed = false;
@@ -51,6 +55,11 @@ Full changelog: https://github.com/kpg-anon/coomwall/blob/main/CHANGELOG.md`;
       try { await settings.load(); } catch { /* keep defaults */ }
     }
     if (!settings.s.autoUpdateCheck) return;
+    try {
+      portable = await api.isPortable();
+    } catch {
+      /* treat as installed */
+    }
     // The updater only resolves in the packaged app against the public release
     // endpoint. In dev, offline, or when no newer release is published, this
     // throws or returns null — fail silently rather than nag the user.
@@ -67,6 +76,20 @@ Full changelog: https://github.com/kpg-anon/coomwall/blob/main/CHANGELOG.md`;
       console.debug("[updater] check skipped:", e);
     }
   });
+
+  /** Portable copies: open the release's portable zip in the browser. */
+  async function downloadPortable() {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(
+        `https://github.com/kpg-anon/coomwall/releases/download/v${version}/coomwall_${version}_x64-portable.zip`,
+      );
+      dismissed = true;
+    } catch (e) {
+      errorMsg = String(e);
+      phase = "error";
+    }
+  }
 
   async function install() {
     if (!update) return;
@@ -187,10 +210,18 @@ Full changelog: https://github.com/kpg-anon/coomwall/blob/main/CHANGELOG.md`;
           <button class="cl-foot" onclick={() => openExternal(changelogUrl)}>Full changelog ↗</button>
         {/if}
       {/if}
-      <div class="row">
-        <button class="btn go" onclick={install}>Update now</button>
-        <button class="btn ghost" onclick={() => (dismissed = true)}>Later</button>
-      </div>
+      {#if portable}
+        <p class="notes">Portable copy: download the new zip and put its <code>coomwall.exe</code> and <code>WebView2Loader.dll</code> over the ones in this folder. Keep the <code>coomwall-data</code> folder; it holds your settings and saved walls.</p>
+        <div class="row">
+          <button class="btn go" onclick={downloadPortable}>Download zip</button>
+          <button class="btn ghost" onclick={() => (dismissed = true)}>Later</button>
+        </div>
+      {:else}
+        <div class="row">
+          <button class="btn go" onclick={install}>Update now</button>
+          <button class="btn ghost" onclick={() => (dismissed = true)}>Later</button>
+        </div>
+      {/if}
     {:else if phase === "downloading"}
       <div class="head"><span class="title">Downloading v{version}…</span></div>
       <div class="bar"><div class="fill" style="width:{progress}%"></div></div>
@@ -233,6 +264,9 @@ Full changelog: https://github.com/kpg-anon/coomwall/blob/main/CHANGELOG.md`;
   .notes {
     color: var(--text-muted); font-size: 11.5px; line-height: 1.45;
     margin: 8px 0 0; white-space: pre-wrap;
+  }
+  .notes code {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-secondary);
   }
 
   /* Structured, scrollable changelog. */

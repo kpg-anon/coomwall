@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] — 2026-11-13
+## [1.0.0] — 2026-11-14
 
 The first public release.
 
@@ -23,3 +23,4 @@ The first public release.
 - **Right-click** on any item: show in Explorer, open, center it, stack it, previous or next item, remove from the wall, never show again.
 - **Preferences** in tabs: theme, behavior under the pointer, automatic pausing, keys, Grid fit, graphics adapter, color handling, yt-dlp cookies, and updates.
 - **In-app updates.** coomwall checks GitHub for a newer release on launch (Preferences → General), shows its changelog, and installs it on **Update now**.
+- **Portable zip.** `coomwall_<version>_x64-portable.zip` runs without installing. It keeps settings, saved walls, the cache and the browser profile in a `coomwall-data` folder next to `coomwall.exe`. Its update notice offers the new zip instead of running the installer.

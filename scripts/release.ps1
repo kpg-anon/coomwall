@@ -7,12 +7,14 @@
       1. Guard: refuse to run unless the git identity is the kpg-anon noreply
          (never commit with a personal email).
       2. Bump the version everywhere (scripts/bump-version.ps1).
-      3. Build the signed Tauri bundles (unless -SkipBuild) and write the
-         updater manifest latest.json, whose notes are this version's
-         CHANGELOG.md section: that is what the in-app update notice shows.
+      3. Build the signed Tauri bundles (unless -SkipBuild), zip the portable
+         copy, and write the updater manifest latest.json, whose notes are
+         this version's CHANGELOG.md section: that is what the in-app update
+         notice shows.
       4. Commit all changes (no Co-Authored-By, no footers).
       5. Tag vX.Y.Z and push the branch and the tag.
-      6. Create a GitHub Release with the installers and latest.json attached.
+      6. Create a GitHub Release with the installers, the portable zip and
+         latest.json attached.
 
     The updater signing key (.tauri-updater.key) and its passphrase
     (.tauri-updater.pass) live in the repo root, gitignored. Back them up
@@ -133,6 +135,41 @@ if ($SkipBuild) {
     $bundleDir = Join-Path $root 'target/release/bundle'
     $bundles = @(Get-ChildItem -Path $bundleDir -Recurse -Include "*_$($Version)_*.msi", "*_$($Version)_*-setup.exe" -ErrorAction SilentlyContinue)
     if (-not $DryRun -and $bundles.Count -eq 0) { throw "No installers found in $bundleDir for version $Version." }
+
+    # Portable zip: coomwall.exe (frontend and icon embedded), WebView2Loader.dll,
+    # and a coomwall-data folder. That folder beside the exe is what makes the app
+    # keep its settings, saved walls, cache and WebView2 profile in it (data_dir
+    # in commands.rs) instead of %APPDATA% / %LOCALAPPDATA%.
+    if (-not $DryRun) {
+        $rel = Join-Path $root 'target/release'
+        $stage = Join-Path $rel 'portable'
+        if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+        New-Item -ItemType Directory -Force (Join-Path $stage 'coomwall-data') | Out-Null
+        Copy-Item (Join-Path $rel 'coomwall.exe') $stage
+        Copy-Item (Join-Path $rel 'WebView2Loader.dll') $stage
+        $readme = @(
+            'coomwall keeps its settings, saved walls, cache and browser profile in this folder'
+            'because it sits next to coomwall.exe. Keep it when you update: replace only'
+            'coomwall.exe and WebView2Loader.dll with the ones from the new zip.'
+            ''
+            'Delete or rename this folder to make coomwall use the per-user folders instead'
+            '(%APPDATA%\com.coomwall.app and %LOCALAPPDATA%\com.coomwall.app).'
+        ) -join "`r`n"
+        [System.IO.File]::WriteAllText((Join-Path $stage 'coomwall-data/README.txt'), $readme)
+        $zip = Join-Path $rel "coomwall_${Version}_x64-portable.zip"
+        # Entries are named by hand: on PowerShell 5.1 both Compress-Archive and
+        # ZipFile.CreateFromDirectory write "coomwall-data\README.txt" with a
+        # backslash, which some unzip tools turn into a file name.
+        if (Test-Path $zip) { Remove-Item -Force $zip }
+        Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+        $archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
+        try {
+            foreach ($name in 'coomwall.exe', 'WebView2Loader.dll', 'coomwall-data/README.txt') {
+                [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, (Join-Path $stage $name), $name, 'Optimal')
+            }
+        } finally { $archive.Dispose() }
+        $bundles += Get-Item $zip
+    }
 
     # latest.json: points the in-app updater at the signed NSIS installer.
     if (-not $DryRun) {

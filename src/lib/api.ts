@@ -101,6 +101,8 @@ export function mediaUrl(path: string): string {
 }
 
 export const api = {
+  /** true when coomwall-data sits beside the exe (the portable zip) */
+  isPortable: () => invoke<boolean>("is_portable"),
   scan: (sources: string[], recursive: boolean) =>
     invoke<ScanReport>("scan_sources", { sources, recursive }),
   rememberDims: (records: DimRecord[]) => invoke<number>("remember_dims", { records }),
