@@ -320,7 +320,7 @@
           ></canvas>
         {/each}
         {#if layer === top && ctl.pinned}<span class="badge nf" style:left="{g.panes[g.panes.length - 1].x + g.panes[g.panes.length - 1].w - 30}px" style:top="{g.panes[g.panes.length - 1].y + 8}px">{I.pin}</span>{/if}
-        {#if layer === top && unmuted && layer.media.kind === "video"}<span class="badge sound nf" style:left="{g.panes[0].x + 8}px" style:top="{g.panes[0].y + 8}px">{I.volume}</span>{/if}
+        {#if layer === top && unmuted && layer.media.kind === "video"}<span class="badge sound sound-mark nf" style:left="{g.panes[0].x + 8}px" style:top="{g.panes[0].y + 8}px">{I.volume}</span>{/if}
       </div>
     {/if}
   {/each}

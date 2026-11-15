@@ -129,6 +129,8 @@ export interface Settings {
   maxCrop: number;
   /** the hovered video plays with sound */
   audioFollowsMouse: boolean;
+  /** every video on the wall plays with sound */
+  audioAll: boolean;
   /** monitor name to go fullscreen on; "" = the one the window is on */
   monitor: string;
   /** read by Rust at launch (src-tauri/src/gpu.rs); a change needs a restart */
@@ -248,6 +250,7 @@ export const DEFAULTS: Settings = {
   stillness: 1.2,
   maxCrop: 0.3,
   audioFollowsMouse: false,
+  audioAll: false,
   monitor: "",
   gpu: "auto",
   color: "direct",

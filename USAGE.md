@@ -90,7 +90,7 @@ Tick **Display N has its own folders** (under Sources) to give a display its own
 
 - Keys go to the wall under the pointer.
 - `Space` pauses or resumes that wall. `Shift`+`Space` does it for all of them.
-- `M` turns sound on or off for one item; items on other walls keep theirs. `Shift`+`M` turns sound off on every wall.
+- `M` turns sound on or off for one item; items on other walls keep theirs. `Shift`+`M` turns sound off on every wall. With **Sound on every video** (Preferences → Behavior) every video plays with sound and `M` does nothing; `Shift`+`M` turns that off until the next start.
 - `Ctrl`+`Shift`+arrow moves the wall to the display on that side. If that display has a wall, the two swap; their media keeps playing and each display keeps the layout that moved onto it.
 - `Esc` on any wall closes all of them. Closing one with `Alt+F4` leaves the others running; setup comes back when the last one closes.
 - Each wall shuffles on its own, so with a small folder the same file can appear on two displays at once.
@@ -132,7 +132,7 @@ If you want the walls above everything else, turn on **Keep the wall above other
 | `Shift`+wheel | zoom into a pinned tile or the center tile (Mosaic, Dynamic, Grid) or into Stack's panes, toward the pointer, up to 8× |
 | `Shift`+drag | move the picture inside a pinned tile or the center tile, when it is cropped or zoomed · `Shift`+double-click centers it and drops the zoom. Position and zoom are kept until the tile shows another item, and saved with the wall |
 | `M` | sound on or off for the item under the pointer; any number of items can have sound |
-| `Shift` `M` | sound off for every item, on every wall |
+| `Shift` `M` | sound off for every item, on every wall (also ends **Sound on every video** until the next start) |
 | `F`, double-click | view it whole: zoom and pan |
 | `C` | play it in the center · on the center item, or with nothing under the pointer: center off or on |
 | `O` | show the file in Explorer |

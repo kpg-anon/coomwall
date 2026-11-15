@@ -264,7 +264,7 @@
     </div>
   {/each}
   {#if tile.pinned}<span class="badge nf" title="Pinned">{I.pin}</span>{/if}
-  {#if unmuted && top?.media.kind === "video"}<span class="badge sound nf">{I.volume}</span>{/if}
+  {#if unmuted && top?.media.kind === "video"}<span class="badge sound sound-mark nf">{I.volume}</span>{/if}
 </div>
 
 <style>

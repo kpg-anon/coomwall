@@ -6,14 +6,18 @@
     The full publish runbook, automated (the same as comfysort's). Steps:
       1. Guard: refuse to run unless the git identity is the kpg-anon noreply
          (never commit with a personal email).
-      2. Bump the version everywhere (scripts/bump-version.ps1).
-      3. Build the signed Tauri bundles (unless -SkipBuild), zip the portable
+      2. Check that X.Y.Z is newer than the current version and that
+         CHANGELOG.md has entries for it: a "## [X.Y.Z]" section, or entries
+         under "## [Unreleased]", which become that section dated today.
+         Without either the script stops before changing anything.
+      3. Bump the version everywhere (scripts/bump-version.ps1).
+      4. Build the signed Tauri bundles (unless -SkipBuild), zip the portable
          copy, and write the updater manifest latest.json, whose notes are
          this version's CHANGELOG.md section: that is what the in-app update
          notice shows.
-      4. Commit all changes (no Co-Authored-By, no footers).
-      5. Tag vX.Y.Z and push the branch and the tag.
-      6. Create a GitHub Release with the installers, the portable zip and
+      5. Commit all changes (no Co-Authored-By, no footers).
+      6. Tag vX.Y.Z and push the branch and the tag.
+      7. Create a GitHub Release with the installers, the portable zip and
          latest.json attached.
 
     The updater signing key (.tauri-updater.key) and its passphrase
@@ -94,6 +98,38 @@ if ($name -ne $ExpectedIdentityName) {
 }
 Write-Host "    OK: $name <$email>" -ForegroundColor Green
 if (git tag --list $tag) { throw "Tag $tag already exists. Delete it first if it was never pushed: git tag -d $tag" }
+
+# Changelog: every release needs its own CHANGELOG.md section, because that
+# section is what the in-app update notice shows. If "## [X.Y.Z]" is missing,
+# the entries under "## [Unreleased]" become that section (dated today) and
+# [Unreleased] is left empty. With neither, stop before anything is changed.
+Step "Checking the version"
+$current = ([System.IO.File]::ReadAllText((Join-Path $root 'package.json')) | ConvertFrom-Json).version
+if ([version]$Version -le [version]$current) { throw "Version $Version is not newer than the current $current." }
+Write-Host "    OK: $current -> $Version" -ForegroundColor Green
+
+Step "Checking CHANGELOG.md for $Version"
+if (-not (Get-ChangelogNotes $Version)) {
+    $cl = Join-Path $root 'CHANGELOG.md'
+    $lines = [System.IO.File]::ReadAllLines($cl)
+    $u = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^##\s*\[Unreleased\]') { $u = $i; break } }
+    $end = $lines.Count
+    if ($u -ge 0) { for ($i = $u + 1; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^##\s') { $end = $i; break } } }
+    $pending = if ($u -ge 0) { ($lines[($u + 1)..($end - 1)] -join "`n").Trim() } else { '' }
+    if (-not $pending) {
+        if ($Notes) { Write-Warning "CHANGELOG.md has no entries for $Version; the release uses -Notes only." }
+        else { throw "CHANGELOG.md has no '## [$Version]' section and nothing under '## [Unreleased]'. Write the changes there first." }
+    } else {
+        $date = (Get-Date).ToString('yyyy-MM-dd')
+        $out = @($lines[0..$u]) + '' + "## [$Version] $([char]0x2014) $date" + '' + $pending + '' + $(if ($end -lt $lines.Count) { @($lines[$end..($lines.Count - 1)]) } else { @() })
+        if ($DryRun) { Write-Host "    (dry-run) would move [Unreleased] into [$Version] - $date" -ForegroundColor DarkGray }
+        else {
+            [System.IO.File]::WriteAllText($cl, (($out -join "`n").TrimEnd() + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host "    moved [Unreleased] into [$Version] $date" -ForegroundColor Green
+        }
+    }
+} else { Write-Host "    OK: section [$Version] found" -ForegroundColor Green }
 
 # 2. Bump.
 Step "Bumping version to $Version"

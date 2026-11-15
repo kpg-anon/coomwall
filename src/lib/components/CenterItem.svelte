@@ -42,7 +42,7 @@
   {#key media.key}
     <MediaView {media} muted={!unmuted} {volume} {rate} {paused} loop onready={() => (shown = true)} />
   {/key}
-  {#if unmuted && media.kind === "video"}<span class="badge nf">{I.volume}</span>{/if}
+  {#if unmuted && media.kind === "video"}<span class="badge sound-mark nf">{I.volume}</span>{/if}
 </div>
 
 <style>

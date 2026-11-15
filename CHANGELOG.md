@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Sound on every video** (Preferences → Behavior, off by default): every video on the wall plays with sound at once, instead of only the items you pick with `M`. `Shift`+`M` on a wall turns it off until the next start.
+
 ## [1.0.0] — 2026-11-14
 
 The first public release.

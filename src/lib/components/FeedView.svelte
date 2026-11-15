@@ -56,7 +56,7 @@
             cross={lane.cross}
             gap={s.gap}
             {paused}
-            unmuted={sounding.has(item.media.key) || (s.audioFollowsMouse && hoverKey === item.media.key)}
+            unmuted={s.audioAll || sounding.has(item.media.key) || (s.audioFollowsMouse && hoverKey === item.media.key)}
             volume={s.volume / 100}
             rate={s.rate}
             ring={hudVisible && hoverKey === item.media.key}

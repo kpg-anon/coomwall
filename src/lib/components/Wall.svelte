@@ -109,7 +109,10 @@
   const link = multi
     ? linkWalls({
         pause: (p) => (paused = p),
-        silence: () => sounding.clear(),
+        silence: () => {
+          sounding.clear();
+          s.audioAll = false;
+        },
         focusAny: (f) => (focusedAny = f),
         remove: (path) => dropHere(path),
         onTop: (on) => {
@@ -577,6 +580,7 @@
   /** M: sound on for this item, or off if it has it. Other items keep theirs. */
   function sound(target: Media) {
     if (target.kind === "image") return say("an image has no sound");
+    if (s.audioAll) return say("every video has sound · Shift+M turns it off");
     prune();
     const on = !sounding.has(target.key);
     if (on) sounding.set(target.key, target.path);
@@ -586,9 +590,11 @@
     say(`sound ${on ? "on" : "off"}${n > (on ? 1 : 0) ? ` · ${n} playing` : ""}`);
   }
 
-  /** Shift+M: sound off for every item, on every wall */
+  /** Shift+M: sound off for every item, on every wall. This also ends "Sound on
+   * every video" until the next start; a wall window never saves that setting. */
   function silenceAll() {
     sounding.clear();
+    s.audioAll = false;
     link?.silence();
     say("all sound off");
   }
@@ -1028,7 +1034,7 @@
   const menuTile = $derived(menu && !lightbox ? tileOf(menu.media) : null);
 </script>
 
-<div class="wall" class:hide-cursor={!hudVisible && !help && !menu && naming === null} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
+<div class="wall" class:all-sound={s.audioAll} class:hide-cursor={!hudVisible && !help && !menu && naming === null} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
   {#if tiled}
     <MosaicView ctl={tiled} {s} paused={wallPaused} {sounding} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={open} />
   {:else if stack}
@@ -1038,7 +1044,7 @@
       {w}
       {h}
       paused={wallPaused}
-      unmuted={(!!stack.item && sounding.has(stack.item.key)) || (s.audioFollowsMouse && hover !== null && hover.key === stack.item?.key)}
+      unmuted={s.audioAll || (!!stack.item && sounding.has(stack.item.key)) || (s.audioFollowsMouse && hover !== null && hover.key === stack.item?.key)}
       {hudVisible}
       onhover={(m) => (hover = m)}
       onopen={open}
@@ -1054,7 +1060,7 @@
       media={centerMedia}
       rect={feed.center}
       paused={wallPaused}
-      unmuted={(centerKey !== null && sounding.has(centerKey)) || (s.audioFollowsMouse && hover?.key === centerKey)}
+      unmuted={s.audioAll || (centerKey !== null && sounding.has(centerKey)) || (s.audioFollowsMouse && hover?.key === centerKey)}
       volume={s.volume / 100}
       rate={s.rate}
       ring={hudVisible && hover?.key === centerKey}
@@ -1083,7 +1089,7 @@
         bind:this={viewer}
         media={lightbox.media}
         time={lightbox.time}
-        muted={!sounding.has(lightbox.media.key)}
+        muted={!s.audioAll && !sounding.has(lightbox.media.key)}
         volume={s.volume}
         rate={s.rate}
         chrome={hudVisible}
@@ -1147,6 +1153,10 @@
 </div>
 
 <style>
+  /* with sound on every video the speaker badge on each one says nothing */
+  .wall.all-sound :global(.sound-mark) {
+    display: none;
+  }
   .wall {
     position: fixed;
     inset: 0;

@@ -29,7 +29,7 @@
   let tab = $state<Tab>(lastTab);
 
   /** what "Restore defaults" puts back: everything in this dialog */
-  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
+  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "audioAll", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
   let winH = $state(800);
   const changedAny = $derived(PREF_KEYS.some((k) => JSON.stringify(s[k]) !== JSON.stringify(DEFAULTS[k])));
 
@@ -168,6 +168,9 @@
               </label>
               <label class="check">
                 <input type="checkbox" bind:checked={s.audioFollowsMouse} /><span title="The item under the pointer plays with sound, as well as the items you gave sound with M. Off: only the items you pick with M have sound.">Sound follows the pointer</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" bind:checked={s.audioAll} /><span title="Every video on the wall plays with sound at the same time. Off: only the items you pick with M (and the item under the pointer, if that is on) have sound.">Sound on every video</span>
               </label>
             </div>
           </section>

@@ -79,7 +79,7 @@
     />
   {/if}
   <!-- inside the item, so it travels with the lane's transform and is clipped to the item -->
-  {#if unmuted && item.media.kind === "video"}<span class="badge nf">{I.volume}</span>{/if}
+  {#if unmuted && item.media.kind === "video"}<span class="badge sound-mark nf">{I.volume}</span>{/if}
 </div>
 
 <style>

@@ -47,7 +47,7 @@
       {tile}
       gap={s.gap}
       {paused}
-      unmuted={sounding.has(tile.media.key) || (s.audioFollowsMouse && ctl.hovered === tile.id)}
+      unmuted={s.audioAll || sounding.has(tile.media.key) || (s.audioFollowsMouse && ctl.hovered === tile.id)}
       volume={s.volume / 100}
       rate={s.rate}
       imageSeconds={s.imageSeconds}
