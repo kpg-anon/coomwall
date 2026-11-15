@@ -1,6 +1,6 @@
 [package]
 name = "coomwall"
-version = "1.0.0"
+version = "1.0.1"
 description = "A live media wall for folders of images and videos"
 authors = ["kpg-anon"]
 license = "MIT"
