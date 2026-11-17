@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The viewer's video controls (play, seek, time, sound) are now a setting of their own: Preferences → Behavior → Hide → **The viewer's video controls**. **The viewer's top and bottom bars** (called **In the viewer** in 1.0.2) now hides only the name and tools bar and the key list. If you had it on in 1.0.2, the video controls stay hidden too.
+
 ## [1.0.2] — 2026-11-16
 
 ### Added

@@ -125,8 +125,10 @@ export interface Settings {
   hudSeconds: number;
   /** the wall never shows its top and bottom bars; messages, ? and the pointer still do */
   hideBars: boolean;
-  /** the viewer (F) never shows its bars: name and tools, video controls, keys */
+  /** the viewer (F) never shows its top bar (name, tools) or its key list */
   hideViewerBars: boolean;
+  /** the viewer (F) never shows a video's controls (play, seek, time, sound) */
+  hideViewerControls: boolean;
   /** Mosaic: weight of motion against crop. Higher = calmer. */
   stillness: number;
   /** Mosaic: largest share of any media that may be cropped */
@@ -253,6 +255,7 @@ export const DEFAULTS: Settings = {
   hudSeconds: 2.2,
   hideBars: false,
   hideViewerBars: false,
+  hideViewerControls: false,
   stillness: 1.2,
   maxCrop: 0.3,
   audioFollowsMouse: false,
@@ -299,6 +302,8 @@ function migrate(o: any) {
   // before 1.0 the order was a Shuffle checkbox
   if (o.order === undefined && typeof o.shuffle === "boolean") o.order = o.shuffle ? "shuffle" : "folder";
   delete o.shuffle;
+  // in 1.0.2 hideViewerBars also hid the video controls
+  if (o.hideViewerBars === true && o.hideViewerControls === undefined) o.hideViewerControls = true;
 }
 
 /** A speed list as typed in setup: positive numbers, fastest first, no repeats. */

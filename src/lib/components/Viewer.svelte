@@ -21,14 +21,16 @@
     rate: number;
     /** the controls are shown (the pointer moved a moment ago) */
     chrome: boolean;
-    /** the bars never show (Preferences); the keys still work */
+    /** the top bar and the key list never show (Preferences); the keys still work */
     noBars?: boolean;
+    /** a video's controls never show (Preferences) */
+    noControls?: boolean;
     onclose: () => void;
     onsound: () => void;
     onvolume: (v: number) => void;
   }
 
-  let { media, time, muted, volume, rate, chrome, noBars = false, onclose, onsound, onvolume }: Props = $props();
+  let { media, time, muted, volume, rate, chrome, noBars = false, noControls = false, onclose, onsound, onvolume }: Props = $props();
 
   const MAX_ZOOM = 16;
   const MARGIN = 28;
@@ -63,9 +65,11 @@
   let clickTimer: ReturnType<typeof setTimeout> | undefined;
 
   const isVideo = $derived(media.kind === "video");
-  /** the bars are up; a paused or scrubbed video keeps them up. With
-   * noBars they never are, so the pointer hides on the wall's timer. */
-  const bars = $derived(!noBars && (chrome || scrubbing || !playing));
+  /** the video's controls are drawn at all */
+  const controls = $derived(isVideo && !noControls);
+  /** the bars are up; a paused or scrubbed video keeps them up. With every
+   * part hidden they never are, so the pointer hides on the wall's timer. */
+  const bars = $derived((!noBars || controls) && (chrome || scrubbing || !playing));
   const sideways = $derived(turns % 2 !== 0);
   // the size at which the whole item fits the stage, turned or not
   const fit = $derived.by(() => {
@@ -338,8 +342,9 @@
     </div>
   </div>
 
-  {#if !noBars}
-  <div class="chrome" class:on={bars}>
+  {#if !noBars || controls}
+  <div class="chrome" class:on={bars} class:no-keys={noBars}>
+    {#if !noBars}
     <div class="top">
       <span class="name" title={media.path}>{media.name}</span>
       <span class="dim">{media.w}×{media.h}</span>
@@ -350,8 +355,9 @@
       <button class="tool nf" title="Fit the screen (0)" disabled={zoomShown <= 1.001} onclick={() => reset()}>{I.compress}</button>
       <button class="tool nf close" title="Close (Esc)" onclick={onclose}>{I.close}</button>
     </div>
+    {/if}
 
-    {#if isVideo}
+    {#if controls}
       <div class="bar">
         <button class="tool nf" title={playing ? "Pause (Space)" : "Play (Space)"} onclick={toggle}>{playing ? I.pause : I.play}</button>
         <span class="time">{clock(now)}</span>
@@ -387,6 +393,7 @@
       </div>
     {/if}
 
+    {#if !noBars}
     <div class="keys">
       <span><kbd>wheel</kbd> zoom</span>
       <span><kbd>drag</kbd> pan</span>
@@ -403,6 +410,7 @@
       {/if}
       <span><kbd>Esc</kbd> close</span>
     </div>
+    {/if}
   </div>
   {/if}
 </div>
@@ -519,6 +527,10 @@
     bottom: 58px;
     transform: translateX(-50%);
     width: min(760px, calc(100% - 24px));
+  }
+  /* no key list below it */
+  .no-keys .bar {
+    bottom: 12px;
   }
   .keys {
     left: 12px;
