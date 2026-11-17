@@ -12,6 +12,8 @@
     visible: boolean;
     /** one item is open in the viewer: only messages show, above it */
     bare?: boolean;
+    /** the top and bottom bars are off (Preferences); messages still show */
+    noBars?: boolean;
     help: boolean;
     mode: Mode;
     count: number;
@@ -59,8 +61,8 @@
   ];
 </script>
 
-<div class="hud" class:visible={(p.visible && !p.bare) || p.help || !!p.toast} class:bare={p.bare}>
-  {#if !p.bare}
+<div class="hud" class:visible={(p.visible && !p.bare) || p.help || !!p.toast} class:bare={p.bare} class:no-bars={p.noBars}>
+  {#if !p.bare && !p.noBars}
     <div class="top">
       <button class="back" onclick={p.onexit} title="Back to setup (Esc)"><span class="nf">{I.back}</span></button>
       <span class="brand">coomwall</span>
@@ -94,7 +96,7 @@
   {#if p.toast}<div class="toast">{p.toast}</div>{/if}
   {#if p.stall && !p.bare}<div class="stall"><span class="nf">{I.warn}</span>{p.stall}</div>{/if}
 
-  {#if !p.bare}
+  {#if !p.bare && !p.noBars}
     <div class="bottom">
       {#each KEYS as [k, label]}
         <span class="key"><kbd>{k}</kbd>{label}</span>
@@ -294,6 +296,11 @@
     font-size: 12.5px;
     line-height: 1.45;
     color: var(--text-primary);
+  }
+  /* no top bar to clear */
+  .no-bars .toast,
+  .no-bars .stall {
+    top: 12px;
   }
   .stall .nf {
     color: var(--orange);

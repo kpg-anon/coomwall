@@ -24,7 +24,7 @@ Everything the README leaves out: each mode's settings, every key, the preferenc
 
 **Pick a mode** and its numbers: tiles and stillness for Mosaic, rows or columns plus direction and speed for the feeds, the layout for Grid, panes and a file or link for Stack. In the right-hand column, turn on **Centered media** and choose its file and size if you want one. What to show is at the top of that column: **Show** (videos, images or both), **Shape** (portrait or landscape only), **Size** (skip files whose shorter side is under 480, 720 or 1080 px) and **Order** (shuffle, newest first by file date, or folder order).
 
-The right-hand column also holds playback speed, image duration, a maximum video length (up to 10 minutes; longer videos are skipped in every mode; 0 = no limit), looping short clips, gap and crop limit. The cog at the top right opens **Preferences**, in tabs (General, Behavior, Keyboard, Grid, System): theme, what happens under the pointer, when the wall pauses by itself, controls hide time, volume, keeping the wall on top, graphics adapter, color, the speed keys, and a list of every key. Every setting is remembered. Hovering a setting's name (dotted underline) shows what it does. A slider or choice that is not at its default shows a small ↺ beside it that puts the default back, and Preferences has **Restore defaults** for everything in it.
+The right-hand column also holds playback speed, image duration, a maximum video length (up to 10 minutes; longer videos are skipped in every mode; 0 = no limit), looping short clips, gap and crop limit. The cog at the top right opens **Preferences**, in tabs (General, Behavior, Keyboard, Grid, System): theme, what happens under the pointer, when the wall pauses by itself, controls hide time, hiding the top and bottom bars (on the wall, in the viewer, or both), volume, keeping the wall on top, graphics adapter, color, the speed keys, and a list of every key. Every setting is remembered. Hovering a setting's name (dotted underline) shows what it does. A slider or choice that is not at its default shows a small ↺ beside it that puts the default back, and Preferences has **Restore defaults** for everything in it.
 
 Everything on the setup page has a fixed place: picking another mode changes only what is in the mode's settings box, never where anything else is. In a larger window the cards and that box grow; at the default 1180×820 everything fits without scrolling. The version is shown next to the name.
 
@@ -145,7 +145,7 @@ If you want the walls above everything else, turn on **Keep the wall above other
 | `?` | all keys |
 | `Esc` | back to setup |
 
-The interface only appears while the pointer moves, and hides again after 2.2 s (Preferences → **Controls hide after**, 0.5–10 s). Otherwise the screen is media only.
+The interface only appears while the pointer moves, and hides again after 2.2 s (Preferences → **Controls hide after**, 0.5–10 s). Otherwise the screen is media only. Preferences → Behavior → **Hide the top and bottom bars** has two checkboxes. **On the wall**: the wall's bars never appear; only the pointer, messages and the `?` key list do, and `Esc` goes back to setup. **In the viewer**: the viewer (`F`) shows the item and nothing else; its keys still work.
 
 ## Graphics adapter
 

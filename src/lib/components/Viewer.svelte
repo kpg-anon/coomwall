@@ -21,12 +21,14 @@
     rate: number;
     /** the controls are shown (the pointer moved a moment ago) */
     chrome: boolean;
+    /** the bars never show (Preferences); the keys still work */
+    noBars?: boolean;
     onclose: () => void;
     onsound: () => void;
     onvolume: (v: number) => void;
   }
 
-  let { media, time, muted, volume, rate, chrome, onclose, onsound, onvolume }: Props = $props();
+  let { media, time, muted, volume, rate, chrome, noBars = false, onclose, onsound, onvolume }: Props = $props();
 
   const MAX_ZOOM = 16;
   const MARGIN = 28;
@@ -61,8 +63,9 @@
   let clickTimer: ReturnType<typeof setTimeout> | undefined;
 
   const isVideo = $derived(media.kind === "video");
-  /** the bars are up; a paused or scrubbed video keeps them up */
-  const bars = $derived(chrome || scrubbing || !playing);
+  /** the bars are up; a paused or scrubbed video keeps them up. With
+   * noBars they never are, so the pointer hides on the wall's timer. */
+  const bars = $derived(!noBars && (chrome || scrubbing || !playing));
   const sideways = $derived(turns % 2 !== 0);
   // the size at which the whole item fits the stage, turned or not
   const fit = $derived.by(() => {
@@ -335,6 +338,7 @@
     </div>
   </div>
 
+  {#if !noBars}
   <div class="chrome" class:on={bars}>
     <div class="top">
       <span class="name" title={media.path}>{media.name}</span>
@@ -400,6 +404,7 @@
       <span><kbd>Esc</kbd> close</span>
     </div>
   </div>
+  {/if}
 </div>
 
 <style>

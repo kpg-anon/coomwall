@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Hide the top and bottom bars** (Preferences → Behavior, both off by default), with two separate checkboxes:
+  - **On the wall**: the wall never shows its bars, also when the pointer moves. Messages, the `?` key list and the pointer still appear; `Esc` goes back to setup.
+  - **In the viewer**: one item opened whole (`F` or a double-click) shows no name, tools, video controls or key list. The keys still work: `Space` plays, `←` `→` seek, `Esc` closes.
+
 ## [1.0.1] — 2026-11-14
 
 ### Added

@@ -123,6 +123,10 @@ export interface Settings {
   gap: number;
   /** seconds the HUD and pointer stay up after the pointer stops */
   hudSeconds: number;
+  /** the wall never shows its top and bottom bars; messages, ? and the pointer still do */
+  hideBars: boolean;
+  /** the viewer (F) never shows its bars: name and tools, video controls, keys */
+  hideViewerBars: boolean;
   /** Mosaic: weight of motion against crop. Higher = calmer. */
   stillness: number;
   /** Mosaic: largest share of any media that may be cropped */
@@ -247,6 +251,8 @@ export const DEFAULTS: Settings = {
   volume: 60,
   gap: 4,
   hudSeconds: 2.2,
+  hideBars: false,
+  hideViewerBars: false,
   stillness: 1.2,
   maxCrop: 0.3,
   audioFollowsMouse: false,

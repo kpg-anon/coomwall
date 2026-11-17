@@ -1093,6 +1093,7 @@
         volume={s.volume}
         rate={s.rate}
         chrome={hudVisible}
+        noBars={s.hideViewerBars}
         onclose={() => (lightbox = null)}
         onsound={() => lightbox && sound(lightbox.media)}
         onvolume={(v) => (s.volume = v)}
@@ -1115,6 +1116,7 @@
   <Hud
     visible={hudVisible}
     bare={lightbox !== null}
+    noBars={s.hideBars}
     {help}
     {mode}
     {count}

@@ -29,7 +29,7 @@
   let tab = $state<Tab>(lastTab);
 
   /** what "Restore defaults" puts back: everything in this dialog */
-  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "audioAll", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
+  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "audioAll", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "hideBars", "hideViewerBars", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
   let winH = $state(800);
   const changedAny = $derived(PREF_KEYS.some((k) => JSON.stringify(s[k]) !== JSON.stringify(DEFAULTS[k])));
 
@@ -186,11 +186,23 @@
             </div>
           </section>
           <section>
+            <span class="sec-title">Hide the top and bottom bars</span>
+            <div class="checks">
+              <label class="check">
+                <input type="checkbox" bind:checked={s.hideBars} /><span title="The bars at the top and bottom of the wall never appear, also when the pointer moves. Messages, the ? key list and the pointer still show. Esc goes back to setup.">On the wall</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" bind:checked={s.hideViewerBars} /><span title="While one item is open whole (F or a double-click), its name, tools, video controls and key list never appear. The keys still work: Space plays, the arrows seek, Esc closes.">In the viewer <kbd>F</kbd></span>
+              </label>
+            </div>
+            {#if s.hideBars || s.hideViewerBars}<span class="note">The keys still work: <kbd>Esc</kbd> goes back, <kbd>?</kbd> on the wall lists them.</span>{/if}
+          </section>
+          <section>
             <span class="sec-title">On the wall</span>
             <div class="pair">
               <Range
                 label="Controls hide after"
-                title="How long the bars at the top and bottom of the wall, and the pointer, stay after the pointer stops moving."
+                title={s.hideBars ? "How long the pointer stays after it stops moving." : "How long the bars at the top and bottom of the wall, and the pointer, stay after the pointer stops moving."}
                 bind:value={s.hudSeconds}
                 min={0.5}
                 max={10}
