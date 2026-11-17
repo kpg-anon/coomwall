@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-11-16
+
 ### Added
 - **Hide the top and bottom bars** (Preferences → Behavior, both off by default), with two separate checkboxes:
   - **On the wall**: the wall never shows its bars, also when the pointer moves. Messages, the `?` key list and the pointer still appear; `Esc` goes back to setup.

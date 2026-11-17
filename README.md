@@ -6,7 +6,7 @@
 
 **Point it at folders of images and videos. Pick a mode. Everything plays at once, on every screen.**
 
-<a href="https://github.com/kpg-anon/coomwall/releases/latest"><img src="https://img.shields.io/badge/version-1.0.1-c287ff?style=flat-square" alt="Version 1.0.1"></a>
+<a href="https://github.com/kpg-anon/coomwall/releases/latest"><img src="https://img.shields.io/badge/version-1.0.2-c287ff?style=flat-square" alt="Version 1.0.2"></a>
 <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-57c7e3?style=flat-square" alt="Windows 10 and 11">
 <img src="https://img.shields.io/badge/license-MIT-82d65a?style=flat-square" alt="MIT licence">
 
