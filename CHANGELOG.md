@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-11-24
+
 ### Added
 - **A seek bar on the video under the pointer**, in every mode: a thin line along its bottom edge shows how far it has played; click or drag on it to jump. It shows while the wall's controls do, and not with **The wall's top and bottom bars** hidden. Until now a video on the wall could only be moved through in the viewer (`F`).
 - **Sound on the newest video only** (Preferences → Behavior → Sound → **Newest video**): only the video that appeared last has sound, and the next one to appear takes it over. With a wall on each display, that is the newest video on any of them. An item open whole (`F`) has the sound while it is open.
