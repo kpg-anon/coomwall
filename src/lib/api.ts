@@ -128,8 +128,8 @@ export const api = {
   setSettings: (value: unknown) => invoke<void>("set_settings", { value }),
   /** merge part of the settings into the file (RFC 7396) */
   patchSettings: (patch: unknown) => invoke<void>("patch_settings", { patch }),
-  /** one fullscreen wall per named display; hides the setup window */
-  openWalls: (monitors: string[]) => invoke<number>("open_walls", { monitors }),
+  /** one wall per named display, fullscreen or in a window; hides the setup window */
+  openWalls: (monitors: string[], windowed: boolean) => invoke<number>("open_walls", { monitors, windowed }),
   closeWalls: () => invoke<void>("close_walls"),
   /** move the calling window's wall to the display on that side (swapping with a wall there) */
   moveWall: (dir: "left" | "right" | "up" | "down") => invoke<{ label: string; monitor: string }[]>("move_wall", { dir }),

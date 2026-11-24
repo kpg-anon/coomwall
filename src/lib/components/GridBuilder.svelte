@@ -14,9 +14,12 @@
     fit: "cover" | "contain";
     /** width / height of the display the grid is for */
     aspect?: number;
+    /** with a wall on each display: puts every display's grid back to the
+     * default; absent when they all have it already */
+    onresetall?: () => void;
   }
 
-  let { cols = $bindable(), rows = $bindable(), spans = $bindable(), fit = $bindable(), aspect = 16 / 10 }: Props = $props();
+  let { cols = $bindable(), rows = $bindable(), spans = $bindable(), fit = $bindable(), aspect = 16 / 10, onresetall }: Props = $props();
 
   const CANVAS = 280;
   let canvas = $state<HTMLDivElement>();
@@ -101,6 +104,9 @@
       Drag across cells to merge them; click a merged tile to split it.
       {#if merged}<button class="link" onclick={() => (spans = [])}>Clear merges</button>{/if}
     </span>
+    {#if onresetall}
+      <span class="hint"><button class="link" title="Every display's grid goes back to 3×1 with no merged cells, whichever mode it is in." onclick={onresetall}>Reset the grid on every display</button></span>
+    {/if}
   </div>
 
   <div class="side">

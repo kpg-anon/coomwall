@@ -19,6 +19,8 @@
     imageSeconds: number;
     minVideo: number;
     ring: boolean;
+    /** the top item, if a video, shows its seek bar */
+    seekbar?: boolean;
     /** under the pointer: an ended item plays again (twice) before it is replaced */
     watched: boolean;
     /** Dynamic: videos loop and images stay; the controller's clock replaces them */
@@ -34,7 +36,7 @@
   }
 
 
-  let { tile, gap, paused, unmuted, volume, rate, imageSeconds, minVideo, ring, watched, endless, fit = "cover", ondone, onenter, onleave, onopen, onpan }: Props = $props();
+  let { tile, gap, paused, unmuted, volume, rate, imageSeconds, minVideo, ring, seekbar = false, watched, endless, fit = "cover", ondone, onenter, onleave, onopen, onpan }: Props = $props();
 
   interface Layer {
     key: number;
@@ -260,6 +262,7 @@
         loopUntil={minVideo}
         onready={() => shown(layer)}
         onended={() => layer === top && fire()}
+        seekbar={seekbar && layer === top}
       />
     </div>
   {/each}

@@ -23,6 +23,10 @@ export type TypeFilter = "mixed" | "videos" | "images";
 export type ShapeFilter = "any" | "portrait" | "landscape";
 /** the order files play in: random, newest first (by file date), or as the folders list them */
 export type Order = "shuffle" | "newest" | "folder";
+/** which videos on the wall play with sound: the ones picked with M; those
+ * and the one under the pointer; every video; only the video that appeared
+ * last (on any wall) */
+export type SoundMode = "picked" | "pointer" | "all" | "newest";
 /** auto: Windows decides (the power-saving GPU for WebView2) */
 export type GpuChoice = "auto" | "high" | "low";
 /** direct: color values go to the display as they are in the file, as mpv
@@ -133,10 +137,7 @@ export interface Settings {
   stillness: number;
   /** Mosaic: largest share of any media that may be cropped */
   maxCrop: number;
-  /** the hovered video plays with sound */
-  audioFollowsMouse: boolean;
-  /** every video on the wall plays with sound */
-  audioAll: boolean;
+  sound: SoundMode;
   /** monitor name to go fullscreen on; "" = the one the window is on */
   monitor: string;
   /** read by Rust at launch (src-tauri/src/gpu.rs); a change needs a restart */
@@ -145,6 +146,8 @@ export interface Settings {
   color: ColorChoice;
   /** the wall stays above every other window */
   alwaysOnTop: boolean;
+  /** the wall starts in a normal window instead of fullscreen; F11 switches a running wall */
+  windowed: boolean;
   theme: string;
   /** a wall on each display that is on in `walls`, instead of one wall */
   multiWall: boolean;
@@ -258,12 +261,12 @@ export const DEFAULTS: Settings = {
   hideViewerControls: false,
   stillness: 1.2,
   maxCrop: 0.3,
-  audioFollowsMouse: false,
-  audioAll: false,
+  sound: "picked",
   monitor: "",
   gpu: "auto",
   color: "direct",
   alwaysOnTop: false,
+  windowed: false,
   theme: "comfy-dark",
   multiWall: false,
   walls: {},
@@ -302,6 +305,12 @@ function migrate(o: any) {
   // before 1.0 the order was a Shuffle checkbox
   if (o.order === undefined && typeof o.shuffle === "boolean") o.order = o.shuffle ? "shuffle" : "folder";
   delete o.shuffle;
+  // before 1.0.4 sound was two checkboxes; "every video" won over the pointer
+  if (o.sound === undefined && (typeof o.audioAll === "boolean" || typeof o.audioFollowsMouse === "boolean")) {
+    o.sound = o.audioAll ? "all" : o.audioFollowsMouse ? "pointer" : "picked";
+  }
+  delete o.audioAll;
+  delete o.audioFollowsMouse;
   // in 1.0.2 hideViewerBars also hid the video controls
   if (o.hideViewerBars === true && o.hideViewerControls === undefined) o.hideViewerControls = true;
 }

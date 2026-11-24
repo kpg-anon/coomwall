@@ -16,12 +16,13 @@
     volume: number;
     rate: number;
     ring: boolean;
+    seekbar?: boolean;
     onenter: (m: Media) => void;
     onleave: (m: Media) => void;
     onopen: (m: Media) => void;
   }
 
-  let { media, rect, paused, unmuted, volume, rate, ring, onenter, onleave, onopen }: Props = $props();
+  let { media, rect, paused, unmuted, volume, rate, ring, seekbar = false, onenter, onleave, onopen }: Props = $props();
 
   let shown = $state(false);
 </script>
@@ -40,7 +41,7 @@
   role="presentation"
 >
   {#key media.key}
-    <MediaView {media} muted={!unmuted} {volume} {rate} {paused} loop onready={() => (shown = true)} />
+    <MediaView {media} muted={!unmuted} {volume} {rate} {paused} loop onready={() => (shown = true)} {seekbar} />
   {/key}
   {#if unmuted && media.kind === "video"}<span class="badge sound-mark nf">{I.volume}</span>{/if}
 </div>

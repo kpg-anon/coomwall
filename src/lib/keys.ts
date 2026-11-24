@@ -34,6 +34,7 @@ export function wallKeys(rateKeys: "list" | "fine", rateList: number[]): KeyRow[
     { keys: ["O"], does: "show the file in Explorer" },
     { keys: [], also: "right-click", does: "show in Explorer, open in the default app, make it the centered media, stack it, previous or next item in its tile, remove from the wall, never show again" },
     { keys: ["T"], does: "keep the walls above every other window, or stop" },
+    { keys: ["F11"], does: "this wall in a window, or fullscreen again" },
     { keys: ["Ctrl", "Shift", "←", "→", "↑", "↓"], does: "move this wall to the display on that side; a wall there swaps with it" },
     { keys: ["Ctrl", "S"], does: "save the wall under a name, to load again from setup · with a wall on each display, every wall" },
     { keys: ["R"], does: "lay the wall out again · Grid: new items · feeds: refill · Stack: turn the panes" },

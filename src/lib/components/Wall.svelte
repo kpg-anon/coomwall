@@ -1,18 +1,20 @@
 <script lang="ts">
-  // The running wall: fullscreen on the chosen monitor, one of the five modes,
+  // The running wall: fullscreen on the chosen monitor (or in a window, with
+  // that setting or after F11), one of the six modes,
   // the HUD and every key. Switching mode (1-5) keeps the queue, so the
   // shuffle carries on where it was. With a wall on each display (multi),
-  // this is one of several windows, already fullscreen on its display, and
+  // this is one of several windows, already placed on its display, and
   // walls.ts keeps pausing, Shift+M (all sound off), focus and removed files
   // in step with the others.
   // Ctrl+Shift+arrow moves the wall to the next display (walls.rs).
   // The wall saves itself into the `last` session every 10 s and as it
   // closes; Ctrl+S saves it under a name (session.ts). A wall started from a
   // saved session builds from its snapshot instead of from the queue.
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
-  import { getCurrentWindow, availableMonitors } from "@tauri-apps/api/window";
-  import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+  import { getCurrentWindow, availableMonitors, currentMonitor } from "@tauri-apps/api/window";
+  import { LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+  import type { Monitor } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { api, isUrl, type GpuInfo, type Rect } from "$lib/api";
@@ -75,6 +77,16 @@
   let hover = $state.raw<Media | null>(null);
   /** the items with sound (M toggles one, Shift+M clears all): Media.key to its path */
   const sounding = new SvelteMap<number, string>();
+  /** Shift+M: "Every video" and "Newest video" act as "Picked with M" until
+   * the next start; the setting itself is not changed */
+  let silenced = $state(false);
+  const soundMode = $derived(silenced && (s.sound === "all" || s.sound === "newest") ? "picked" : s.sound);
+  /** "Newest video": the video that appeared last on this wall, and when (Date.now() ms) */
+  let newest = $state.raw<{ key: number; at: number } | null>(null);
+  /** "Newest video" with a wall on each display: when the newest video on each other wall appeared */
+  const newestElsewhere = new SvelteMap<string, number>();
+  /** feed items, the Stack item, the center item and the item open whole: when each was first seen */
+  const seenAt = new Map<number, number>();
   /** the item open in the viewer, and where its tile's video was */
   let lightbox = $state.raw<{ media: Media; time: number } | null>(null);
   let viewer = $state<Viewer>();
@@ -104,6 +116,13 @@
   let unmounted = false;
 
   const win = getCurrentWindow();
+  // dev: window.__CW_WINDOWED__ runs the wall inside the window as it is, and leaves it so
+  const devWindowed = import.meta.env.DEV && !!(window as any).__CW_WINDOWED__;
+  /** the wall fills its display; false while it runs in a window. A wall
+   * window (multi) was opened one way or the other by walls.rs. */
+  let fullscreen = !s.windowed && !devWindowed;
+  /** where the window was before F11 made it fullscreen, to go back to */
+  let windowRect: { pos: PhysicalPosition; size: PhysicalSize } | null = null;
   // a window is a wall window for its whole life, so reading the prop once is right
   // svelte-ignore state_referenced_locally
   const link = multi
@@ -111,7 +130,7 @@
         pause: (p) => (paused = p),
         silence: () => {
           sounding.clear();
-          s.audioAll = false;
+          silenced = true;
         },
         focusAny: (f) => (focusedAny = f),
         remove: (path) => dropHere(path),
@@ -120,6 +139,13 @@
           applyOnTop();
         },
         save: (name, token) => saveNamedHere(name, token),
+        newest: (from, at) => {
+          // a wall heard from for the first time learns this one's newest too
+          const known = newestElsewhere.has(from);
+          if (at === null) newestElsewhere.delete(from);
+          else newestElsewhere.set(from, at);
+          if (!known && newest) link?.newest(newest.at);
+        },
       })
     : null;
   /** the key this wall's snapshot is saved under: its display, "" for the single wall */
@@ -387,6 +413,49 @@
 
   const DISPLAY_NAME = /^\\\\\.\\/;
 
+  /** a window two thirds of `m`'s work area (less the taskbar), in the middle of it (as walls.rs window_rect) */
+  async function windowOn(m: Monitor) {
+    const a = m.workArea;
+    const sw = Math.round((a.size.width * 2) / 3);
+    const sh = Math.round((a.size.height * 2) / 3);
+    await win.setSize(new PhysicalSize(sw, sh));
+    await win.setPosition(new PhysicalPosition(a.position.x + Math.round((a.size.width - sw) / 2), a.position.y + Math.round((a.size.height - sh) / 2)));
+  }
+
+  /** F11: this wall between fullscreen and a window on the same display */
+  let switching = false;
+  async function toggleWindow() {
+    if (switching) return;
+    switching = true;
+    try {
+      if (fullscreen) {
+        await win.setFullscreen(false);
+        // the setup window's minimum size is for setup; a wall may be smaller
+        if (multi) await win.setDecorations(true);
+        else await win.setMinSize(null);
+        if (windowRect) {
+          await win.setSize(windowRect.size);
+          await win.setPosition(windowRect.pos);
+        } else {
+          const m = await currentMonitor();
+          if (m) await windowOn(m);
+        }
+        fullscreen = false;
+        say("in a window · F11: fullscreen");
+      } else {
+        windowRect = { pos: await win.outerPosition(), size: await win.innerSize() };
+        if (multi) await win.setDecorations(false);
+        await win.setFullscreen(true);
+        fullscreen = true;
+        say("fullscreen · F11: in a window");
+      }
+    } catch (e) {
+      say(`could not change the window: ${e}`, 2600);
+    } finally {
+      switching = false;
+    }
+  }
+
   /** Ctrl+Shift+arrow: this wall to the display on that side, swapping with a wall there */
   function moveWall(dir: "left" | "right" | "up" | "down") {
     api.moveWall(dir).catch((e) => say(String(e)));
@@ -405,6 +474,12 @@
       poke();
       menu = null;
       naming = stamp();
+      return;
+    }
+    if (k === "F11" && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      poke();
+      toggleWindow();
       return;
     }
     if (e.ctrlKey && e.shiftKey && !e.altKey && k.startsWith("Arrow")) {
@@ -577,10 +652,79 @@
     }
   }
 
+  /** this wall's newest video is the newest on every wall */
+  function newestHere(): boolean {
+    if (!newest) return false;
+    for (const at of newestElsewhere.values()) if (at > newest.at) return false;
+    return true;
+  }
+
+  /** whether the video with this key plays with sound; `hovered`: it is under the pointer */
+  function audible(key: number, hovered: boolean): boolean {
+    if (soundMode === "all") return true;
+    if (soundMode === "newest") return newest?.key === key && !lightbox && newestHere();
+    return sounding.has(key) || (soundMode === "pointer" && hovered);
+  }
+
+  /** "Newest video": the video that appeared last on this wall. An item open
+   * whole counts from when it was opened, a feed item from when half of it
+   * came on screen. */
+  function findNewest(): { key: number; at: number } | null {
+    const now = Date.now();
+    // performance.now() counts from each window's start; Date.now() is shared with the other walls
+    const clock = now - performance.now();
+    let best: { key: number; at: number } | null = null;
+    const offer = (m: Media, at: number) => {
+      if (m.kind === "video" && (!best || at > best.at)) best = { key: m.key, at };
+    };
+    const live = new Set<number>();
+    const seen = (m: Media) => {
+      live.add(m.key);
+      let at = seenAt.get(m.key);
+      if (at === undefined) seenAt.set(m.key, (at = now));
+      offer(m, at);
+    };
+    if (lightbox) seen(lightbox.media);
+    else {
+      if (tiled) for (const t of tiled.tiles) if (!t.leaving) offer(t.media, clock + t.since);
+      if (stack?.item) seen(stack.item);
+      if (feed) {
+        for (const l of feed.lanes)
+          for (const i of l.items) {
+            const a = Math.max(0, i.pos - l.offset);
+            const b = Math.min(l.span, i.pos + i.len - l.offset);
+            if (b - a >= i.len / 2) seen(i.media);
+          }
+        if (feed.center && centerMedia && centered) seen(centerMedia);
+      }
+    }
+    for (const k of [...seenAt.keys()]) if (!live.has(k)) seenAt.delete(k);
+    return best;
+  }
+
+  $effect(() => {
+    if (soundMode !== "newest") return;
+    const look = () => {
+      const n = findNewest();
+      if (n?.key === newest?.key && n?.at === newest?.at) return;
+      newest = n;
+      link?.newest(n?.at ?? null);
+    };
+    // only soundMode starts and stops this; what look() reads is polled
+    untrack(look);
+    const iv = setInterval(look, 250);
+    return () => {
+      clearInterval(iv);
+      newest = null;
+      link?.newest(null);
+    };
+  });
+
   /** M: sound on for this item, or off if it has it. Other items keep theirs. */
   function sound(target: Media) {
     if (target.kind === "image") return say("an image has no sound");
-    if (s.audioAll) return say("every video has sound · Shift+M turns it off");
+    if (soundMode === "all") return say("every video has sound · Shift+M turns it off");
+    if (soundMode === "newest") return say("the newest video has sound · Shift+M turns it off");
     prune();
     const on = !sounding.has(target.key);
     if (on) sounding.set(target.key, target.path);
@@ -590,11 +734,12 @@
     say(`sound ${on ? "on" : "off"}${n > (on ? 1 : 0) ? ` · ${n} playing` : ""}`);
   }
 
-  /** Shift+M: sound off for every item, on every wall. This also ends "Sound on
-   * every video" until the next start; a wall window never saves that setting. */
+  /** Shift+M: sound off for every item, on every wall. With "Every video" or
+   * "Newest video", sound stays off until the next start (`silenced`); the
+   * setting itself is not changed. */
   function silenceAll() {
     sounding.clear();
-    s.audioAll = false;
+    silenced = true;
     link?.silence();
     say("all sound off");
   }
@@ -894,17 +1039,20 @@
 
   onMount(() => {
     let alive = true;
+    /** the setup window's place, to put it back when the wall ends */
     let restore: { pos: PhysicalPosition; size: PhysicalSize } | null = null;
-    // dev: window.__CW_WINDOWED__ runs the wall inside the window as it is
-    const windowed = import.meta.env.DEV && (window as any).__CW_WINDOWED__;
     (async () => {
       const centerLoad = s.centered ? loadCenter() : null;
       try {
         // a wall window was placed on its display by walls.rs
-        if (s.monitor && !multi && !windowed) {
-          const target = (await availableMonitors()).find((m) => m.name === s.monitor);
-          if (target) {
-            restore = { pos: await win.outerPosition(), size: await win.outerSize() };
+        if (!multi && !devWindowed) {
+          restore = { pos: await win.outerPosition(), size: await win.innerSize() };
+          const target = s.monitor ? (await availableMonitors()).find((m) => m.name === s.monitor) : undefined;
+          if (!fullscreen) {
+            await win.setMinSize(null);
+            // in a window on the chosen display; one already on it stays as it is
+            if (target && (await currentMonitor())?.name !== target.name) await windowOn(target);
+          } else if (target) {
             // Shrink first: on a 250% laptop panel the setup window is ~2950 px
             // wide, more than a 1920 px monitor, and Windows fullscreens a
             // window on whichever monitor holds most of it.
@@ -912,7 +1060,7 @@
             await win.setPosition(new PhysicalPosition(target.position.x + 60, target.position.y + 60));
           }
         }
-        if (!windowed) await win.setFullscreen(true);
+        if (fullscreen && !multi) await win.setFullscreen(true);
         if (s.alwaysOnTop) applyOnTop();
       } catch (e) {
         console.warn("fullscreen:", e);
@@ -990,13 +1138,14 @@
       // a wall window is closing; nothing to restore
       if (multi) return;
       win.setAlwaysOnTop(false).catch(() => {});
-      if (windowed) return;
-      win
-        .setFullscreen(false)
+      if (devWindowed) return;
+      (fullscreen ? win.setFullscreen(false) : Promise.resolve())
         .then(async () => {
+          // tauri.conf.json's minWidth and minHeight
+          await win.setMinSize(new LogicalSize(900, 640));
           if (!restore) return win.center();
-          await win.setPosition(restore.pos);
           await win.setSize(restore.size);
+          await win.setPosition(restore.pos);
         })
         .catch(() => {});
     };
@@ -1034,9 +1183,9 @@
   const menuTile = $derived(menu && !lightbox ? tileOf(menu.media) : null);
 </script>
 
-<div class="wall" class:all-sound={s.audioAll} class:hide-cursor={!hudVisible && !help && !menu && naming === null} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
+<div class="wall" class:all-sound={soundMode === "all"} class:hide-cursor={!hudVisible && !help && !menu && naming === null} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
   {#if tiled}
-    <MosaicView ctl={tiled} {s} paused={wallPaused} {sounding} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={open} />
+    <MosaicView ctl={tiled} {s} paused={wallPaused} {audible} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={open} />
   {:else if stack}
     <StackView
       ctl={stack}
@@ -1044,14 +1193,14 @@
       {w}
       {h}
       paused={wallPaused}
-      unmuted={s.audioAll || (!!stack.item && sounding.has(stack.item.key)) || (s.audioFollowsMouse && hover !== null && hover.key === stack.item?.key)}
+      unmuted={!!stack.item && audible(stack.item.key, hover !== null && hover.key === stack.item.key)}
       {hudVisible}
       onhover={(m) => (hover = m)}
       onopen={open}
     />
   {:else if feed}
     {#key feedGen}
-      <FeedView ctl={feed} {s} paused={wallPaused} {sounding} {hudVisible} onhover={(m) => (hover = m)} onopen={open} />
+      <FeedView ctl={feed} {s} paused={wallPaused} {audible} {hudVisible} onhover={(m) => (hover = m)} onopen={open} />
     {/key}
   {/if}
 
@@ -1060,10 +1209,11 @@
       media={centerMedia}
       rect={feed.center}
       paused={wallPaused}
-      unmuted={s.audioAll || (centerKey !== null && sounding.has(centerKey)) || (s.audioFollowsMouse && hover?.key === centerKey)}
+      unmuted={centerKey !== null && audible(centerKey, hover?.key === centerKey)}
       volume={s.volume / 100}
       rate={s.rate}
       ring={hudVisible && hover?.key === centerKey}
+      seekbar={!s.hideBars && hudVisible && hover?.key === centerKey}
       onenter={(m) => (hover = m)}
       onleave={(m) => {
         if (hover?.key === m.key) hover = null;
@@ -1089,7 +1239,7 @@
         bind:this={viewer}
         media={lightbox.media}
         time={lightbox.time}
-        muted={!s.audioAll && !sounding.has(lightbox.media.key)}
+        muted={soundMode === "newest" ? !(newest?.key === lightbox.media.key && newestHere()) : !(soundMode === "all" || sounding.has(lightbox.media.key))}
         volume={s.volume}
         rate={s.rate}
         chrome={hudVisible}

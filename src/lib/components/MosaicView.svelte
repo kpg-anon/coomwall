@@ -9,14 +9,15 @@
     s: Settings;
     paused: boolean;
     /** keys of the items with sound */
-    sounding: ReadonlyMap<number, string>;
+    /** whether the video with this key plays with sound; `hovered`: it is under the pointer */
+    audible: (key: number, hovered: boolean) => boolean;
     hudVisible: boolean;
     debug: boolean;
     onhover: (m: Media | null) => void;
     onopen: (m: Media) => void;
   }
 
-  let { ctl, s, paused, sounding, hudVisible, debug, onhover, onopen }: Props = $props();
+  let { ctl, s, paused, audible, hudVisible, debug, onhover, onopen }: Props = $props();
 
   function enter(t: TileState) {
     ctl.hovered = t.id;
@@ -47,12 +48,13 @@
       {tile}
       gap={s.gap}
       {paused}
-      unmuted={s.audioAll || sounding.has(tile.media.key) || (s.audioFollowsMouse && ctl.hovered === tile.id)}
+      unmuted={audible(tile.media.key, ctl.hovered === tile.id)}
       volume={s.volume / 100}
       rate={s.rate}
       imageSeconds={s.imageSeconds}
       minVideo={s.minVideoSeconds}
       ring={hudVisible && ctl.hovered === tile.id}
+      seekbar={!s.hideBars && hudVisible && ctl.hovered === tile.id}
       watched={s.hoverHold && ctl.hovered === tile.id}
       endless={ctl.dynamic}
       fit={ctl.fit ?? "cover"}

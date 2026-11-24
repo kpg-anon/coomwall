@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A seek bar on the video under the pointer**, in every mode: a thin line along its bottom edge shows how far it has played; click or drag on it to jump. It shows while the wall's controls do, and not with **The wall's top and bottom bars** hidden. Until now a video on the wall could only be moved through in the viewer (`F`).
+- **Sound on the newest video only** (Preferences → Behavior → Sound → **Newest video**): only the video that appeared last has sound, and the next one to appear takes it over. With a wall on each display, that is the newest video on any of them. An item open whole (`F`) has the sound while it is open.
+- **Run the wall in a window** (Preferences → General): the wall opens in a normal window with a title bar, which you can move and resize, instead of filling the display. With a wall on each display, each one is a window on its display. `F11` on a running wall switches it between a window and fullscreen.
+- **Reset the grid on every display** (setup, under the Grid drawing, with a wall on each display): every display's grid goes back to 3×1 with no merged cells. It shows while any display has a different grid.
+
+### Changed
+- Sound is now one choice instead of two checkboxes (Preferences → Behavior → Sound): **Picked with M**, **Also the pointer**, **Every video** or **Newest video**. Your earlier choice carries over.
+- `Shift`+`M` no longer turns off **Every video** in your settings. It turns sound off until the next start of the wall, and the setting stays as it was.
+
+### Fixed
+- `Ctrl`+`J` opened WebView2's Downloads panel. The browser keys of WebView2 (Downloads, History, Print, Find, Reload, DevTools and the others) are now turned off in the window itself.
+
 ## [1.0.3] — 2026-11-16
 
 ### Changed

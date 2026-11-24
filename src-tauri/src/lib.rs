@@ -7,6 +7,35 @@ mod ytdl;
 
 use tauri::Manager;
 
+/// Turn off WebView2's browser keys (Ctrl+J downloads, Ctrl+H history,
+/// Ctrl+P print, F12 DevTools, ...) for one window. The page also cancels
+/// them in appfeel.ts, but WebView2 acts on some of them anyway. Tauri 2.12
+/// has no option for this setting. Release builds only: a dev build keeps
+/// DevTools and reload.
+pub(crate) fn browser_keys_off(w: &tauri::WebviewWindow) {
+    #[cfg(all(windows, not(debug_assertions)))]
+    {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+        use windows::core::Interface;
+        let done = w.with_webview(|wv| unsafe {
+            let off = wv
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.Settings())
+                .and_then(|s| s.cast::<ICoreWebView2Settings3>())
+                .and_then(|s3| s3.SetAreBrowserAcceleratorKeysEnabled(false));
+            if let Err(e) = off {
+                eprintln!("coomwall: browser keys stay on: {e}");
+            }
+        });
+        if let Err(e) = done {
+            eprintln!("coomwall: browser keys stay on: {e}");
+        }
+    }
+    #[cfg(not(all(windows, not(debug_assertions))))]
+    let _ = w;
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -76,7 +105,7 @@ pub fn run() {
             if let Some(dir) = &data_dir {
                 window = window.data_directory(dir.clone());
             }
-            window.build()?;
+            browser_keys_off(&window.build()?);
             app.manage(walls::Template { config: cfg, data_dir });
             Ok(())
         })

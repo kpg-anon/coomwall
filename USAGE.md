@@ -32,6 +32,8 @@ Everything on the setup page has a fixed place: picking another mode changes onl
 
 Under the Grid card: one-click presets (columns × rows), a box that takes `5x2`, sliders for columns (1–8) and rows (1–6), and a drawing of the grid. Drag across cells in the drawing to merge them into one tile; click a merged tile to split it. On the wall, `+` `−` change the columns and `↑` `↓` the rows.
 
+With a wall on each display, every display has its own grid. **Reset the grid on every display**, under the drawing, puts all of them back to 3×1 with no merged cells; it shows while any display has a different grid.
+
 **Only media that fits the cells** (with "Fills its tile") uses only files whose shape fits the cells, so nothing is cut off more than a little. How close is a preference (cog → Grid): **Automatic** (exact shape on a 16:9 screen, up to 12% cut on any other), **Exact shape**, or **Up to 12% cut**. On a 16:9 screen a 3×3 grid has 16:9 cells, so 16:9 video fits exactly; on a 16:10 screen the cells are 1.6:1 and 16:9 video loses about 10%. Setup shows how many of your files fit before you start; if none do, the wall says so. Mosaic's **Crop limit** does not apply to Grid.
 
 ## Stack
@@ -90,7 +92,7 @@ Tick **Display N has its own folders** (under Sources) to give a display its own
 
 - Keys go to the wall under the pointer.
 - `Space` pauses or resumes that wall. `Shift`+`Space` does it for all of them.
-- `M` turns sound on or off for one item; items on other walls keep theirs. `Shift`+`M` turns sound off on every wall. With **Sound on every video** (Preferences → Behavior) every video plays with sound and `M` does nothing; `Shift`+`M` turns that off until the next start.
+- `M` turns sound on or off for one item; items on other walls keep theirs. `Shift`+`M` turns sound off on every wall. With **Every video** or **Newest video** (see [Sound](#sound)) `M` does nothing, and `Shift`+`M` turns sound off until the next start.
 - `Ctrl`+`Shift`+arrow moves the wall to the display on that side. If that display has a wall, the two swap; their media keeps playing and each display keeps the layout that moved onto it.
 - `Esc` on any wall closes all of them. Closing one with `Alt+F4` leaves the others running; setup comes back when the last one closes.
 - Each wall shuffles on its own, so with a small folder the same file can appear on two displays at once.
@@ -105,9 +107,24 @@ A running wall saves what it shows every 10 seconds and when it closes. **Resume
 - With a wall on each display, every display's wall is saved and comes back on its display. A display that is not connected is left out, and the walls say so; if none of them is connected, the first saved wall opens on the setup window's display.
 - Not saved: what each tile showed before (`B`), pause, the viewer, and how far each Ribbon or Cascade lane had moved, beyond the first item.
 
+## Sound
+
+Preferences → Behavior → **Sound** decides which videos on the wall play with sound:
+
+- **Picked with M** (the default): only the items you give sound with `M`. Any number of items can have it.
+- **Also the pointer**: those, and the video under the pointer.
+- **Every video**: all of them at once. `M` does nothing.
+- **Newest video**: only the video that appeared last. In Mosaic, Dynamic and Grid that is the tile that changed last; in Ribbon and Cascade, the item that most recently came half onto the screen; in Stack, the item playing. When a newer video appears, it takes the sound over; an image does not. With a wall on each display, only the newest video on any of the walls has sound. An item open whole (`F`) has the sound while it is open. `M` does nothing.
+
+`Shift`+`M` turns sound off on every wall. With **Every video** or **Newest video** it stays off until the next start; the setting itself is not changed.
+
+## Seeking on the wall
+
+While the controls are up, the video under the pointer shows a thin line along its bottom edge: how far it has played. Click or drag on it to jump to that point; the time under the pointer shows above the line. In Stack the line runs along the bottom of all the panes. The line hides with the other controls, and does not show with **The wall's top and bottom bars** hidden. `Shift`+drag starting on it still moves the picture in a pinned or centered tile.
+
 ## Walls and other windows
 
-A wall is an ordinary fullscreen window. Bring another program to the front (a global hotkey, `Alt+Tab`, the taskbar) and it stays in front; moving the pointer over a wall does not bring the wall back. Click a wall to return to it.
+A wall is an ordinary fullscreen window, or a normal window with **Run the wall in a window** (Preferences → General). In a window it has a title bar and can be moved and resized; with a wall on each display, each wall opens as a window over two thirds of its display. `F11` switches a running wall between a window and fullscreen; the setting decides only how walls start. `Ctrl`+`Shift`+arrow moves a wall in a window to the middle of the next display. Bring another program to the front (a global hotkey, `Alt+Tab`, the taskbar) and it stays in front; moving the pointer over a wall does not bring the wall back. Click a wall to return to it.
 
 If you want the walls above everything else, turn on **Keep the wall above other windows** (Preferences, the cog at the top right), or press `T` on a wall.
 
@@ -131,13 +148,14 @@ If you want the walls above everything else, turn on **Keep the wall above other
 | `P` | pin it: it keeps playing, and no other change moves it · Stack: it loops |
 | `Shift`+wheel | zoom into a pinned tile or the center tile (Mosaic, Dynamic, Grid) or into Stack's panes, toward the pointer, up to 8× |
 | `Shift`+drag | move the picture inside a pinned tile or the center tile, when it is cropped or zoomed · `Shift`+double-click centers it and drops the zoom. Position and zoom are kept until the tile shows another item, and saved with the wall |
-| `M` | sound on or off for the item under the pointer; any number of items can have sound |
-| `Shift` `M` | sound off for every item, on every wall (also ends **Sound on every video** until the next start) |
+| `M` | sound on or off for the item under the pointer; any number of items can have sound (see [Sound](#sound)) |
+| `Shift` `M` | sound off for every item, on every wall (with **Every video** or **Newest video**, until the next start) |
 | `F`, double-click | view it whole: zoom and pan |
 | `C` | play it in the center · on the center item, or with nothing under the pointer: center off or on |
 | `O` | show the file in Explorer |
 | right-click | Show in Explorer · Open in default app · Make it the centered media · Stack it · Previous item · Next item · Remove from wall · Never show again |
 | `T` | keep the walls above every other window, or stop |
+| `F11` | this wall in a window, or fullscreen again |
 | `Ctrl` `Shift` `←` `→` `↑` `↓` | move this wall to the display on that side; a wall there swaps with it |
 | `Ctrl` `S` | save the wall under a name (a field opens with the date and time; `Enter` saves, `Esc` cancels). With a wall on each display, every wall is saved together. Saving under a name already used replaces that save |
 | `R` | lay the wall out again · Grid: new items · feeds: refill · Stack: turn the panes |

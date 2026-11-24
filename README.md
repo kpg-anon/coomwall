@@ -61,11 +61,11 @@ Any mode can also have **centered media**: one file that plays in the middle at 
 1. **Add sources.** Drop folders or `.m3u` playlists on the window, or click to choose. Subfolders are included unless you turn that off. Hidden folders such as comfysort's `.trash` are skipped.
 2. **Pick what to show:** everything, videos only or images only, any shape, portrait only or landscape only.
 3. **Pick a mode** and its numbers. The right-hand column has **Centered media**, size and order filters, and playback settings.
-4. **Start the wall** with `Enter`. It goes fullscreen on the display you chose. `Esc` comes back.
+4. **Start the wall** with `Enter`. It goes fullscreen on the display you chose, or opens in a window with **Run the wall in a window** (Preferences → General). `Esc` comes back.
 
 ### On the wall
 
-The controls appear while the pointer moves and hide after 2.2 s; otherwise the screen is media only. Keys act on the item under the pointer.
+The controls appear while the pointer moves and hide after 2.2 s; otherwise the screen is media only. Keys act on the item under the pointer. The video under the pointer shows a seek line along its bottom edge; click or drag on it to jump.
 
 | Key | Does |
 | --- | --- |
@@ -75,6 +75,7 @@ The controls appear while the pointer moves and hide after 2.2 s; otherwise the 
 | `N` · `B` | next item in this tile · the item it showed before |
 | `P` | pin it: it keeps playing and nothing moves it |
 | `M` | sound on or off for this item |
+| `F11` | in a window, or fullscreen |
 | `F`, double-click | view it whole, with zoom and pan |
 | `C` | play it in the center |
 | right-click | Show in Explorer, open, center, stack, remove, never show again |

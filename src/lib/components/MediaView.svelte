@@ -5,6 +5,7 @@
   // separate sound (media.audioUrl) plays in an <audio> that follows the video.
   import type { Media } from "$lib/queue.svelte";
   import { followVideo } from "$lib/audiosync";
+  import SeekBar from "./SeekBar.svelte";
 
   interface Props {
     media: Media;
@@ -25,6 +26,8 @@
     onended?: () => void;
     /** it could not be loaded or played; without this, a failure counts as its end */
     onerror?: (why: string) => void;
+    /** a video shows a seek bar along its bottom edge */
+    seekbar?: boolean;
   }
 
   let {
@@ -41,6 +44,7 @@
     onready,
     onended,
     onerror,
+    seekbar = false,
   }: Props = $props();
 
   const objectPosition = $derived(position ? `${position.x}% ${position.y}%` : undefined);
@@ -200,6 +204,7 @@
   {#if media.audioUrl}
     <audio bind:this={audio} src={media.audioUrl} preload="auto" {loop}></audio>
   {/if}
+  {#if seekbar}<SeekBar {video} />{/if}
 {/if}
 
 <style>

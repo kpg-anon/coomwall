@@ -1,4 +1,5 @@
-//! Several walls at once: one fullscreen window per display, each running
+//! Several walls at once: one window per display, fullscreen or (with the
+//! "run the wall in a window" setting) a normal window on it, each running
 //! its own wall (the frontend reads which display from `window.__CW_WALL__`).
 //! The setup window hides while they run and comes back when the last one
 //! closes, however it was closed.
@@ -27,11 +28,22 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// A window on display `m` that is not fullscreen: two thirds of its work
+/// area (the display less the taskbar), in the middle of it.
+pub fn window_rect(m: &Monitor) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+    let a = m.work_area();
+    let size = PhysicalSize::new(a.size.width * 2 / 3, a.size.height * 2 / 3);
+    let pos = PhysicalPosition::new(a.position.x + ((a.size.width - size.width) / 2) as i32, a.position.y + ((a.size.height - size.height) / 2) as i32);
+    (pos, size)
+}
+
 /// Open a wall on each named display, then hide the setup window. Returns how
-/// many opened; displays that are no longer connected are skipped.
+/// many opened; displays that are no longer connected are skipped. With
+/// `windowed` each wall is a normal window with a title bar instead of
+/// fullscreen.
 // async: creating a window from a synchronous command deadlocks on Windows
 #[tauri::command]
-pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors: Vec<String>) -> Result<usize, String> {
+pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors: Vec<String>, windowed: bool) -> Result<usize, String> {
     let all = app.available_monitors().map_err(err)?;
     let cursor = app.cursor_position().ok();
     let mut focus = None;
@@ -47,13 +59,16 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
         cfg.label = format!("{PREFIX}{}", NEXT.fetch_add(1, Ordering::Relaxed));
         cfg.visible = false;
         cfg.center = false;
-        cfg.decorations = false;
+        cfg.decorations = windowed;
         // small enough to sit inside any display before going fullscreen, so
         // Windows fullscreens it on the one it was moved to
         cfg.width = 640.0;
         cfg.height = 400.0;
         cfg.min_width = None;
         cfg.min_height = None;
+        // in the title bar of a wall in a window, and on the taskbar
+        // (Windows names displays \\.\DISPLAY2)
+        cfg.title = format!("coomwall · {}", name.trim_start_matches(r"\\.\"));
         let mut builder = tauri::WebviewWindowBuilder::from_config(&app, &cfg)
             .map_err(err)?
             .initialization_script(format!("window.__CW_WALL__ = {}; window.__CW_RUN__ = {run};", serde_json::to_string(name).map_err(err)?));
@@ -61,8 +76,14 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
             builder = builder.data_directory(dir.clone());
         }
         let w = builder.build().map_err(err)?;
+        crate::browser_keys_off(&w);
         let (pos, size) = (m.position(), m.size());
-        let placed = w.set_position(PhysicalPosition::new(pos.x + 60, pos.y + 60)).and_then(|_| w.set_fullscreen(true)).and_then(|_| w.show());
+        let placed = if windowed {
+            let (at, sz) = window_rect(m);
+            w.set_size(sz).and_then(|_| w.set_position(at)).and_then(|_| w.show())
+        } else {
+            w.set_position(PhysicalPosition::new(pos.x + 60, pos.y + 60)).and_then(|_| w.set_fullscreen(true)).and_then(|_| w.show())
+        };
         if let Err(e) = placed {
             // a hidden wall window left behind would count as a wall still
             // open, and setup would never come back
@@ -96,9 +117,23 @@ pub struct Moved {
     monitor: String,
 }
 
-/// Put a fullscreen window on another display: leave fullscreen, shrink so it
-/// fits inside the target, move there, fullscreen again.
+/// Put a wall on another display. A fullscreen one leaves fullscreen,
+/// shrinks so it fits inside the target, moves there and goes fullscreen
+/// again. One in a window keeps its size where the target has room for it,
+/// and goes to the middle of the target's work area.
 fn place(w: &WebviewWindow, m: &Monitor) -> tauri::Result<()> {
+    if !w.is_fullscreen()? {
+        let a = m.work_area();
+        let outer = w.outer_size()?;
+        if outer.width > a.size.width || outer.height > a.size.height {
+            let (at, sz) = window_rect(m);
+            w.set_size(sz)?;
+            return w.set_position(at);
+        }
+        let x = a.position.x + ((a.size.width - outer.width) / 2) as i32;
+        let y = a.position.y + ((a.size.height - outer.height) / 2) as i32;
+        return w.set_position(PhysicalPosition::new(x, y));
+    }
     w.set_fullscreen(false)?;
     w.set_size(PhysicalSize::new(640, 400))?;
     let p = m.position();

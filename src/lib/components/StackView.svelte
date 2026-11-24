@@ -9,6 +9,7 @@
   // in every pane at once; Shift+double-click puts it back.
   import { untrack } from "svelte";
   import MediaView from "./MediaView.svelte";
+  import SeekBar from "./SeekBar.svelte";
   import type { Rect } from "$lib/api";
   import type { Media } from "$lib/queue.svelte";
   import type { Pan } from "$lib/session";
@@ -35,6 +36,8 @@
     media: Media;
     shown: boolean;
     pan?: Pan;
+    /** its <video> once the first frame is ready, for the seek bar */
+    video?: HTMLVideoElement;
   }
 
   const ZOOM_MAX = 8;
@@ -115,6 +118,7 @@
   /** the first frame is up: draw, fade in, and follow every new frame */
   function ready(layer: Layer) {
     const el = views[layer.key]?.element();
+    if (el instanceof HTMLVideoElement) layer.video = el;
     if (el instanceof HTMLVideoElement && "requestVideoFrameCallback" in el) {
       const frame = () => {
         if (!layers.includes(layer)) return;
@@ -256,7 +260,9 @@
     ctl.hovered = true;
     onhover(ctl.item);
   }
-  function leave() {
+  function leave(e: PointerEvent) {
+    // from a pane onto the seek bar over it, or back: still over the item
+    if ((e.relatedTarget as Element | null)?.closest?.(".stack .pane, .stack .seek")) return;
     hovered = false;
     ctl.hovered = false;
     onhover(null);
@@ -320,6 +326,15 @@
           ></canvas>
         {/each}
         {#if layer === top && ctl.pinned}<span class="badge nf" style:left="{g.panes[g.panes.length - 1].x + g.panes[g.panes.length - 1].w - 30}px" style:top="{g.panes[g.panes.length - 1].y + 8}px">{I.pin}</span>{/if}
+        {#if layer === top && layer.video && !s.hideBars && hudVisible && hovered}
+          <!-- along the bottom of all the panes together -->
+          {@const x0 = Math.min(...g.panes.map((p) => p.x))}
+          {@const x1 = Math.max(...g.panes.map((p) => p.x + p.w))}
+          {@const y1 = Math.max(...g.panes.map((p) => p.y + p.h))}
+          <div class="seek" style:left="{x0}px" style:top="{y1 - 22}px" style:width="{x1 - x0}px" onpointerenter={enter} onpointerleave={leave} role="presentation">
+            <SeekBar video={layer.video} />
+          </div>
+        {/if}
         {#if layer === top && unmuted && layer.media.kind === "video"}<span class="badge sound sound-mark nf" style:left="{g.panes[0].x + 8}px" style:top="{g.panes[0].y + 8}px">{I.volume}</span>{/if}
       </div>
     {/if}
@@ -372,6 +387,10 @@
   }
   .pane.pinned {
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--yellow) 70%, transparent);
+  }
+  .seek {
+    position: absolute;
+    height: 22px;
   }
   .badge {
     position: absolute;

@@ -218,6 +218,19 @@
 
   const selIndex = $derived(monitors.findIndex((m) => m.name === sel));
 
+  const defaultGrid = (l: Layout) => l.gridCols === DEFAULTS.gridCols && l.gridRows === DEFAULTS.gridRows && !(l.gridSpans ?? []).length;
+  /** some display's grid differs from the default (columns, rows or merges) */
+  const gridsChanged = $derived(multi && monitors.some((m) => s.walls[m.name] && !defaultGrid(s.walls[m.name])));
+
+  /** every display's grid, and the shared one new displays copy, back to the default */
+  function resetGrids() {
+    for (const l of [s, ...Object.values(s.walls)]) {
+      l.gridCols = DEFAULTS.gridCols;
+      l.gridRows = DEFAULTS.gridRows;
+      l.gridSpans = [];
+    }
+  }
+
   /** Grid with "only media that fits": how many files in the shared
    * sources fit its tiles (by the sizes the scan already knows) */
   const gridFitInfo = $derived.by(() => {
@@ -276,7 +289,7 @@
     try {
       // the wall windows read settings.json as they load
       await settings.saveNow();
-      await api.openWalls(wallsOn.map((m) => m.name));
+      await api.openWalls(wallsOn.map((m) => m.name), s.windowed);
     } catch (e) {
       wallError = String(e);
     }
@@ -345,7 +358,7 @@
         await settings.saveNow();
         await rescan();
         await api.setResume(name, here.map(([k]) => [k, k]), note);
-        await api.openWalls(here.map(([k]) => k));
+        await api.openWalls(here.map(([k]) => k), s.windowed);
         return;
       }
       // One wall, in this window: the session's own, or from a session of
@@ -718,7 +731,7 @@
                 />
               </div>
             {:else if L.mode === "grid"}
-              <GridBuilder bind:cols={L.gridCols} bind:rows={L.gridRows} bind:spans={L.gridSpans} bind:fit={L.gridFit} aspect={selAspect} />
+              <GridBuilder bind:cols={L.gridCols} bind:rows={L.gridRows} bind:spans={L.gridSpans} bind:fit={L.gridFit} aspect={selAspect} onresetall={gridsChanged ? resetGrids : undefined} />
               <div class="grid-fit">
                 <label class="check" class:dim={L.gridFit !== "cover"}>
                   <input type="checkbox" bind:checked={L.gridOnlyFits} disabled={L.gridFit !== "cover"} /><span title="Use only files whose shape matches the cells, so nothing is cut off much. How close the match must be is in Preferences → Grid.">Only media that fits the cells</span>

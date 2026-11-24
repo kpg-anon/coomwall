@@ -18,12 +18,13 @@
     volume: number;
     rate: number;
     ring: boolean;
+    seekbar?: boolean;
     onenter: (m: Media) => void;
     onleave: (m: Media) => void;
     onopen: (m: Media) => void;
   }
 
-  let { item, axis, cross, paused, unmuted, volume, rate, ring, onenter, onleave, onopen }: Props = $props();
+  let { item, axis, cross, paused, unmuted, volume, rate, ring, seekbar = false, onenter, onleave, onopen }: Props = $props();
 
   let el = $state<HTMLDivElement>();
   let inView = $state(false);
@@ -76,6 +77,7 @@
       paused={paused || !inView}
       loop
       onready={() => (shown = true)}
+      {seekbar}
     />
   {/if}
   <!-- inside the item, so it travels with the lane's transform and is clipped to the item -->

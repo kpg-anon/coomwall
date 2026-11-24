@@ -29,7 +29,7 @@
   let tab = $state<Tab>(lastTab);
 
   /** what "Restore defaults" puts back: everything in this dialog */
-  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "audioFollowsMouse", "audioAll", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "hudSeconds", "hideBars", "hideViewerBars", "hideViewerControls", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
+  const PREF_KEYS = ["theme", "hoverPause", "hoverHold", "sound", "pauseBehindViewer", "pauseUnfocused", "alwaysOnTop", "windowed", "hudSeconds", "hideBars", "hideViewerBars", "hideViewerControls", "volume", "gpu", "color", "rateKeys", "rateList", "gridFitCrop", "ytdlCookies", "autoUpdateCheck"] as const;
   let winH = $state(800);
   const changedAny = $derived(PREF_KEYS.some((k) => JSON.stringify(s[k]) !== JSON.stringify(DEFAULTS[k])));
 
@@ -148,6 +148,9 @@
               <input type="checkbox" bind:checked={s.alwaysOnTop} /><span title="The wall stays above every other window, even one you click on. T on the wall turns it on or off.">Keep the wall above other windows <kbd>T</kbd></span>
             </label>
             <span class="note">Off: another program you bring to the front stays in front of the wall.</span>
+            <label class="check">
+              <input type="checkbox" bind:checked={s.windowed} /><span title="The wall opens in a normal window with a title bar, which you can move and resize, instead of filling the display. With a wall on each display, each one is a window on its display. F11 on a running wall switches it between a window and fullscreen.">Run the wall in a window <kbd>F11</kbd></span>
+            </label>
           </section>
           <section>
             <span class="sec-title">Updates</span>
@@ -166,13 +169,22 @@
               <label class="check">
                 <input type="checkbox" bind:checked={s.hoverHold} /><span title="Mosaic, Dynamic and Grid: the tile under the pointer is never moved by other changes, and plays its item again instead of changing to the next.">Mosaic, Dynamic, Grid: the tile holds still and keeps its item</span>
               </label>
-              <label class="check">
-                <input type="checkbox" bind:checked={s.audioFollowsMouse} /><span title="The item under the pointer plays with sound, as well as the items you gave sound with M. Off: only the items you pick with M have sound.">Sound follows the pointer</span>
-              </label>
-              <label class="check">
-                <input type="checkbox" bind:checked={s.audioAll} /><span title="Every video on the wall plays with sound at the same time. Off: only the items you pick with M (and the item under the pointer, if that is on) have sound.">Sound on every video</span>
-              </label>
             </div>
+          </section>
+          <section>
+            <span class="sec-title">Sound</span>
+            <Segmented
+              label="Videos with sound"
+              title="Picked with M: only the videos you give sound with M. Also the pointer: those, and the video under the pointer. Every video: all of them at once. Newest video: only the video that appeared last, on any wall; the next one to appear takes the sound over, and an item open whole (F) has it while open. Shift+M on the wall turns sound off until the next start."
+              bind:value={s.sound}
+              def={DEFAULTS.sound}
+              options={[
+                { value: "picked", label: "Picked with M" },
+                { value: "pointer", label: "Also the pointer" },
+                { value: "all", label: "Every video" },
+                { value: "newest", label: "Newest video" },
+              ]}
+            />
           </section>
           <section>
             <span class="sec-title">Pause the wall</span>

@@ -3,8 +3,9 @@
 // what is shared in step: Shift+Space pauses every wall (Space alone pauses
 // one), Shift+M turns sound off on every wall, a file removed from one wall
 // leaves all of them, T puts every wall above other windows or not, Ctrl+S
-// saves every wall into one named session, and "another window is active"
-// means no wall has focus.
+// saves every wall into one named session, "another window is active"
+// means no wall has focus, and with sound on the newest video only, each
+// wall tells the others when its newest video appeared.
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -26,6 +27,8 @@ interface Handlers {
   onTop: (on: boolean) => void;
   /** Ctrl+S on some wall, this one included: every wall saves itself into session `name` */
   save: (name: string, run: number) => void;
+  /** another wall's newest video appeared at `at` (Date.now() ms); null: it has none */
+  newest: (from: string, at: number | null) => void;
 }
 
 export function linkWalls(h: Handlers) {
@@ -45,6 +48,7 @@ export function linkWalls(h: Handlers) {
     listen<string>("cw-remove", (e) => h.remove(e.payload)),
     listen<{ from: string; on: boolean }>("cw-ontop", (e) => e.payload.from !== me && h.onTop(e.payload.on)),
     listen<{ name: string; run: number }>("cw-save", (e) => h.save(e.payload.name, e.payload.run)),
+    listen<{ from: string; at: number | null }>("cw-newest", (e) => e.payload.from !== me && h.newest(e.payload.from, e.payload.at)),
     listen<{ label: string; focused: boolean }>("cw-focus", (e) => {
       focus.set(e.payload.label, e.payload.focused);
       report();
@@ -57,6 +61,7 @@ export function linkWalls(h: Handlers) {
     onTop: (on: boolean) => emit("cw-ontop", { from: me, on }),
     save: (name: string, run: number) => emit("cw-save", { name, run }),
     focused: (focused: boolean) => emit("cw-focus", { label: me, focused }),
+    newest: (at: number | null) => emit("cw-newest", { from: me, at }),
     destroy() {
       clearTimeout(blurTimer);
       offs.forEach((p) => p.then((off) => off()).catch(() => {}));

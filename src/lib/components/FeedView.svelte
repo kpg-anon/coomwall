@@ -9,13 +9,14 @@
     s: Settings;
     paused: boolean;
     /** keys of the items with sound */
-    sounding: ReadonlyMap<number, string>;
+    /** whether the video with this key plays with sound; `hovered`: it is under the pointer */
+    audible: (key: number, hovered: boolean) => boolean;
     hudVisible: boolean;
     onhover: (m: Media | null) => void;
     onopen: (m: Media) => void;
   }
 
-  let { ctl, s, paused, sounding, hudVisible, onhover, onopen }: Props = $props();
+  let { ctl, s, paused, audible, hudVisible, onhover, onopen }: Props = $props();
 
   let hoverKey = $state<number | null>(null);
 
@@ -56,10 +57,11 @@
             cross={lane.cross}
             gap={s.gap}
             {paused}
-            unmuted={s.audioAll || sounding.has(item.media.key) || (s.audioFollowsMouse && hoverKey === item.media.key)}
+            unmuted={audible(item.media.key, hoverKey === item.media.key)}
             volume={s.volume / 100}
             rate={s.rate}
             ring={hudVisible && hoverKey === item.media.key}
+            seekbar={!s.hideBars && hudVisible && hoverKey === item.media.key}
             onenter={(m) => {
               hoverKey = m.key;
               onhover(m);
