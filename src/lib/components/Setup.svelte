@@ -12,7 +12,7 @@
   import { availableMonitors, currentMonitor, type Monitor } from "@tauri-apps/api/window";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { getVersion } from "@tauri-apps/api/app";
-  import { settings, DEFAULTS, LIMITS, MODE_NAMES, layoutOf, savedLayout, type Layout, type Mode, type WallLayout } from "$lib/settings.svelte";
+  import { settings, DEFAULTS, LIMITS, LAYOUT_KEYS, MODE_NAMES, layoutOf, savedLayout, type Layout, type Mode, type WallLayout } from "$lib/settings.svelte";
   import { cropIn, fitTolerance, gridLabel, gridRects } from "$lib/grid";
   import { library } from "$lib/library.svelte";
   import { api, isUrl } from "$lib/api";
@@ -228,6 +228,34 @@
       l.gridCols = DEFAULTS.gridCols;
       l.gridRows = DEFAULTS.gridRows;
       l.gridSpans = [];
+    }
+  }
+
+  /** What the Reset button at the top of Mode puts back: the mode and every
+   * mode's numbers, the filters, centered media off and its size. The
+   * chosen centered file and Stack's file or link stay, ready for when they
+   * are turned on again; so do the folders and the right column's Playback
+   * and Layout. */
+  const RESET_KEYS = LAYOUT_KEYS.filter((k) => k !== "center" && k !== "stackItem");
+  const atDefault = (l: Layout) => RESET_KEYS.every((k) => JSON.stringify(l[k] ?? null) === JSON.stringify(DEFAULTS[k] ?? null));
+  /** the wall shown on the page differs from the default, or with a wall on
+   * each display, any display's does */
+  const layoutsChanged = $derived(!atDefault(L) || (multi && monitors.some((m) => s.walls[m.name] && !atDefault(s.walls[m.name]))));
+  /** the first press asks; a second one within a few seconds resets */
+  let confirmReset = $state(false);
+  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function pressReset() {
+    clearTimeout(confirmTimer);
+    if (!confirmReset) {
+      confirmReset = true;
+      confirmTimer = setTimeout(() => (confirmReset = false), 4000);
+      return;
+    }
+    confirmReset = false;
+    // the shared layout and every display's, shown or not
+    for (const l of [s, ...Object.values(s.walls)] as Layout[]) {
+      for (const k of RESET_KEYS) (l as any)[k] = Array.isArray(DEFAULTS[k]) ? [] : DEFAULTS[k];
     }
   }
 
@@ -490,6 +518,27 @@
   </div>
 {/snippet}
 
+<!-- Hidden, not removed, while everything is at its defaults, so its
+     showing up never moves the display tabs or the Mode row -->
+{#snippet resetButton()}
+  <button
+    class="link reset-all"
+    class:gone={!layoutsChanged}
+    disabled={!layoutsChanged}
+    class:confirm={confirmReset}
+    title="Mode back to Mosaic and every mode's settings to their defaults, Show / Shape / Size to Any, Centered media off and its size back{monitors.length > 1 ? ', on every display' : ''}. Your folders, the chosen centered file, Stack's file or link, and Playback and Layout on the right stay as they are."
+    onclick={pressReset}
+  >
+    <span class="nf">{I.undo}</span>
+    <!-- both labels in one place, one of them hidden: the button is always
+         as wide as the longer one, so asking moves nothing either -->
+    <span class="labels">
+      <span class:off={confirmReset}>Reset</span>
+      <span class:off={!confirmReset}>{multi ? "Reset every display? Click again" : "Reset? Click again"}</span>
+    </span>
+  </button>
+{/snippet}
+
 <div class="setup">
   <div class="page">
     <header class="head">
@@ -520,6 +569,7 @@
           {#if s.walls[sel]}
             <label class="check"><input type="checkbox" bind:checked={s.walls[sel].on} /><span title="Off: no wall opens on this display when you start.">Wall on display {selIndex + 1}</span></label>
           {/if}
+          {@render resetButton()}
         </div>
       {/if}
       <button class="cog" title="Preferences: theme, keys, behavior, window, graphics" onclick={() => (prefs = true)}>
@@ -670,6 +720,7 @@
                   <input type="checkbox" bind:checked={s.multiWall} onchange={ensureWalls} /><span title="Open one wall on every display at once. Each display has its own mode, centered media and filters; pick a display with the tabs at the top.">A wall on each display</span>
                 </label>
               {/if}
+              {#if !multi}{@render resetButton()}{/if}
             </span>
           </div>
 
@@ -1080,6 +1131,37 @@
     gap: 14px;
     /* both cards reach down to the Start button */
     align-items: stretch;
+  }
+  /* Side by side, the two cards need a window 1100 px wide: narrower, the
+     filter rows ran out of the right card and the mode names out of their
+     cards. A display turned upright gives a window about 960 px wide. Below
+     1100 px the right card goes under the main one, its four sections two by
+     two. */
+  @media (width < 1100px) {
+    /* spare height goes to the main card's mode settings box, as it does
+       side by side */
+    .cols {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: 1fr auto;
+    }
+    .card.side {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: start;
+      column-gap: 28px;
+    }
+    .side > section:nth-child(2) {
+      border-top: 0;
+    }
+    /* the display tabs, "Wall on display N" and Reset get a line of their
+       own under the title */
+    .head {
+      flex-wrap: wrap;
+    }
+    .head > .head-displays {
+      order: 1;
+      flex: 0 0 100%;
+    }
   }
 
   .card {
@@ -1709,6 +1791,29 @@
     align-items: center;
     gap: 18px;
   }
+  .reset-all {
+    white-space: nowrap;
+  }
+  .reset-all.gone {
+    visibility: hidden;
+  }
+  .reset-all .labels {
+    display: inline-grid;
+    text-align: left;
+  }
+  .reset-all .labels > span {
+    grid-area: 1 / 1;
+  }
+  .reset-all .labels > .off {
+    visibility: hidden;
+  }
+  .reset-all .nf {
+    font-size: 11px;
+  }
+  .reset-all.confirm,
+  .reset-all.confirm:hover {
+    color: var(--orange);
+  }
   .inline-select {
     display: inline-flex;
     align-items: center;
@@ -1907,11 +2012,24 @@
     border-color: var(--purple);
     color: var(--text-primary);
   }
-  /* the Start bar: always in view at the bottom of the window */
+  /* the Start bar: always in view at the bottom of the window. In a window
+     too short for the page, the page scrolls under it. */
   .foot {
-    position: relative;
+    position: sticky;
+    bottom: 18px;
+    z-index: 5;
     display: flex;
     justify-content: center;
+  }
+  /* what scrolls under the bar is hidden: down to the window's edge, out to
+     the page's sides, and up over the 12 px gap above it (only page
+     background is there when the page does not scroll) */
+  .foot::before {
+    content: "";
+    position: absolute;
+    inset: -12px -20px -18px;
+    z-index: -1;
+    background: var(--bg-app);
   }
   .err-line {
     position: absolute;

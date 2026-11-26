@@ -1,6 +1,7 @@
 <script lang="ts">
   // One item, whole and uncropped, over the wall (F, double-click). The wheel
   // zooms toward the pointer, a drag pans, a double-click zooms in and back.
+  // On a touchscreen two fingers pinch to zoom and one drags.
   // A video gets a bar: play, seek, time, sound. It starts where the tile
   // was. The wall pauses underneath unless pauseBehindViewer is off.
   //
@@ -10,6 +11,7 @@
   import type { Media } from "$lib/queue.svelte";
   import { I } from "$lib/icons";
   import { followVideo } from "$lib/audiosync";
+  import { Fingers, type Step } from "$lib/touch";
 
   interface Props {
     media: Media;
@@ -131,17 +133,38 @@
     zoomAt(z * Math.exp(-e.deltaY * 0.0016), e.clientX, e.clientY);
   }
 
+  /** fingers on the stage: one drags the zoomed item, two pinch it */
+  const fingers = new Fingers();
+  /** this press began on the item, not on the background */
+  let onItem = false;
+  /** when the first finger went down */
+  let touchedAt = 0;
+
   function down(e: PointerEvent) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    dragging = true;
+    if (fingers.down(e)) {
+      // the first finger starts a press; a second one joins it
+      if (fingers.count === 1) {
+        dragged = false;
+        onItem = !!xf?.contains(e.target as Node);
+        touchedAt = e.timeStamp;
+      }
+      return;
+    }
     dragged = false;
+    onItem = false;
+    // the mouse drags from the item only; a click on the background closes
+    if (e.button !== 0 || !xf?.contains(e.target as Node)) return;
+    e.preventDefault();
+    onItem = true;
+    dragging = true;
     last = { x: e.clientX, y: e.clientY };
-    xf?.setPointerCapture(e.pointerId);
-    if (xf) xf.style.cursor = "grabbing";
+    xf.setPointerCapture(e.pointerId);
+    xf.style.cursor = "grabbing";
   }
 
   function move(e: PointerEvent) {
+    const step = fingers.move(e);
+    if (step) return touchStep(step);
     if (!dragging) return;
     const dx = e.clientX - last.x;
     const dy = e.clientY - last.y;
@@ -153,16 +176,36 @@
     apply();
   }
 
-  function up() {
+  /** Two fingers zoom about the point between them, and the item follows
+   * that point as it moves; one finger drags a zoomed item. */
+  function touchStep(st: Step) {
+    if (fingers.travel > 6) dragged = true;
+    if (st.k !== 1) zoomAt(z * st.k, st.x, st.y);
+    if (z <= 1.001) return;
+    pan = { x: pan.x + st.dx / z, y: pan.y + st.dy / z };
+    clamp();
+    apply();
+  }
+
+  function up(e: PointerEvent) {
+    if (fingers.up(e)) {
+      // A finger held this long, or a tap with two, opened the wall's menu
+      // (Wall.svelte): not a tap on the item
+      if (fingers.count === 0 && fingers.most === 1 && e.timeStamp - touchedAt < 550) released();
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     if (xf) xf.style.cursor = "";
-    // A click that was not a drag plays or pauses the video. It waits for
-    // the double-click time first, so zooming does not also pause.
-    if (!dragged && isVideo) {
-      clearTimeout(clickTimer);
-      clickTimer = setTimeout(toggle, 230);
-    }
+    released();
+  }
+
+  /** A click on the item that was not a drag plays or pauses the video. It
+   * waits for the double-click time first, so zooming does not also pause. */
+  function released() {
+    if (dragged || !onItem || !isVideo) return;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(toggle, 230);
   }
 
   function dbl(e: MouseEvent) {
@@ -306,18 +349,19 @@
 </script>
 
 <div class="viewer" class:bare={!bars} role="presentation">
-  <div class="stage" bind:this={stage} bind:clientWidth={sw} bind:clientHeight={sh} onclick={(e) => e.target === stage && onclose()} role="presentation">
-    <div
-      class="xf"
-      class:zoomed={zoomShown > 1.001}
-      bind:this={xf}
-      onpointerdown={down}
-      onpointermove={move}
-      onpointerup={up}
-      onpointercancel={up}
-      ondblclick={dbl}
-      role="presentation"
-    >
+  <div
+    class="stage"
+    bind:this={stage}
+    bind:clientWidth={sw}
+    bind:clientHeight={sh}
+    onclick={(e) => e.target === stage && !dragged && onclose()}
+    onpointerdown={down}
+    onpointermove={move}
+    onpointerup={up}
+    onpointercancel={up}
+    role="presentation"
+  >
+    <div class="xf" class:zoomed={zoomShown > 1.001} bind:this={xf} ondblclick={dbl} role="presentation">
       <div class="turn" class:shown style:width="{fit.w}px" style:height="{fit.h}px" style:transform="rotate({turns * 90}deg) scaleX({flipped ? -1 : 1})">
         {#if isVideo}
           <!-- svelte-ignore a11y_media_has_caption -->
@@ -440,6 +484,7 @@
   .stage {
     position: absolute;
     inset: 0;
+    touch-action: none;
     display: grid;
     place-items: center;
     overflow: hidden;

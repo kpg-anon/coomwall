@@ -396,9 +396,91 @@
     // the name field (Ctrl+S) keeps its cut, copy and paste menu
     if (e.target instanceof HTMLInputElement) return;
     e.preventDefault();
-    const target = lightbox?.media ?? hover;
-    menu = target ? { media: target, x: e.clientX, y: e.clientY } : null;
+    clearPress();
+    openMenu(e.clientX, e.clientY);
+  }
+
+  function openMenu(x: number, y: number, target = lightbox?.media ?? hover) {
+    menu = target ? { media: target, x, y } : null;
     poke();
+  }
+
+  /** P without the key, for a finger held on the wall: pin or unpin the
+   * tile under it, or Stack's item. False when there is nothing to pin
+   * there (a feed, the center tile, no tile). */
+  function pinUnder(): boolean {
+    if (stack) {
+      if (!stack.hovered || !stack.item) return false;
+      stack.togglePin();
+      say(stack.pinned ? "pinned: it loops" : "unpinned");
+      return true;
+    }
+    const t = tiled?.tiles.find((t) => t.id === tiled?.hovered && !t.leaving);
+    if (!tiled || !t || t.fixed) return false;
+    tiled.togglePin(t.id);
+    say(t.pinned ? "pinned" : "unpinned");
+    return true;
+  }
+
+  // Touch. WebView2 sends no contextmenu event for a finger on the wall, so:
+  // a finger held still pins or unpins the item under it (P), or opens the
+  // menu where there is nothing to pin (the viewer, a feed, the center
+  // tile); a quick tap with two fingers opens the menu, as on a touchpad.
+  const HOLD_MS = 550;
+  /** fingers further than this from where they went down are a drag */
+  const STILL_PX = 10;
+  let press: { id: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** the fingers of the touch going on, from where each went down */
+  const touches = new Map<number, { x: number; y: number }>();
+  let gesture: { start: number; most: number; moved: boolean; x: number; y: number; target: Media | null } | null = null;
+
+  function pressDown(e: PointerEvent) {
+    clearPress();
+    if (e.pointerType !== "touch" || e.target instanceof HTMLInputElement) return;
+    if (!touches.size) gesture = { start: e.timeStamp, most: 0, moved: false, x: 0, y: 0, target: null };
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!gesture) return;
+    gesture.most = Math.max(gesture.most, touches.size);
+    if (touches.size === 2) {
+      // the item under the fingers now: once they lift, nothing is hovered
+      const [a, b] = [...touches.values()];
+      Object.assign(gesture, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, target: lightbox?.media ?? hover });
+    }
+    // a second finger makes it a pinch or a tap, not a hold
+    if (touches.size !== 1) return;
+    const { clientX: x, clientY: y } = e;
+    press = {
+      id: e.pointerId,
+      x,
+      y,
+      timer: setTimeout(() => {
+        press = null;
+        if (gesture) gesture.moved = true; // not a tap any more
+        if (lightbox || !pinUnder()) openMenu(x, y);
+      }, HOLD_MS),
+    };
+  }
+
+  function pressMove(e: PointerEvent) {
+    const from = touches.get(e.pointerId);
+    if (!from || Math.hypot(e.clientX - from.x, e.clientY - from.y) <= STILL_PX) return;
+    if (gesture) gesture.moved = true;
+    if (press?.id === e.pointerId) clearPress();
+  }
+
+  function pressUp(e: PointerEvent, cancelled = false) {
+    clearPress();
+    if (!touches.delete(e.pointerId)) return;
+    if (cancelled && gesture) gesture.moved = true;
+    if (touches.size || !gesture) return;
+    const g = gesture;
+    gesture = null;
+    if (g.most === 2 && !g.moved && e.timeStamp - g.start < 400) openMenu(g.x, g.y, g.target);
+  }
+
+  function clearPress() {
+    if (press) clearTimeout(press.timer);
+    press = null;
   }
 
   /** F, double-click: the item whole. A video carries on from where its tile was. */
@@ -1130,6 +1212,7 @@
       window.removeEventListener("resize", resized);
       clearInterval(frames);
       clearTimeout(hudTimer);
+      clearPress();
       tiled?.destroy();
       feed?.destroy();
       stack?.destroy();
@@ -1183,7 +1266,7 @@
   const menuTile = $derived(menu && !lightbox ? tileOf(menu.media) : null);
 </script>
 
-<div class="wall" class:all-sound={soundMode === "all"} class:hide-cursor={!hudVisible && !help && !menu && naming === null} onpointermove={moved} oncontextmenu={contextmenu} role="presentation">
+<div class="wall" class:all-sound={soundMode === "all"} class:hide-cursor={!hudVisible && !help && !menu && naming === null} onpointermove={(e) => (moved(), pressMove(e))} onpointerdown={pressDown} onpointerup={(e) => pressUp(e)} onpointercancel={(e) => pressUp(e, true)} oncontextmenu={contextmenu} role="presentation">
   {#if tiled}
     <MosaicView ctl={tiled} {s} paused={wallPaused} {audible} {hudVisible} {debug} onhover={(m) => (hover = m)} onopen={open} />
   {:else if stack}
@@ -1315,6 +1398,9 @@
     inset: 0;
     background: var(--bg-app);
     overflow: hidden;
+    /* fingers on the wall are read by the page (src/lib/touch.ts): the
+       browser neither scrolls nor zooms for them */
+    touch-action: none;
   }
   .wall.hide-cursor {
     cursor: none;

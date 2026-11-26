@@ -7,32 +7,42 @@ mod ytdl;
 
 use tauri::Manager;
 
-/// Turn off WebView2's browser keys (Ctrl+J downloads, Ctrl+H history,
-/// Ctrl+P print, F12 DevTools, ...) for one window. The page also cancels
-/// them in appfeel.ts, but WebView2 acts on some of them anyway. Tauri 2.12
-/// has no option for this setting. Release builds only: a dev build keeps
-/// DevTools and reload.
-pub(crate) fn browser_keys_off(w: &tauri::WebviewWindow) {
-    #[cfg(all(windows, not(debug_assertions)))]
+/// WebView2 settings Tauri 2.12 has no option for, for one window:
+/// - Pinch zoom off. A two-finger pinch on a touchscreen would otherwise zoom
+///   the whole page; the wall reads the fingers itself (src/lib/touch.ts) to
+///   zoom the item under them.
+/// - Browser keys off (Ctrl+J downloads, Ctrl+H history, Ctrl+P print, F12
+///   DevTools, ...). The page also cancels them in appfeel.ts, but WebView2
+///   acts on some of them anyway. Release builds only: a dev build keeps
+///   DevTools and reload.
+pub(crate) fn webview_settings(w: &tauri::WebviewWindow) {
+    #[cfg(windows)]
     {
-        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings5;
         use windows::core::Interface;
         let done = w.with_webview(|wv| unsafe {
-            let off = wv
-                .controller()
-                .CoreWebView2()
-                .and_then(|core| core.Settings())
-                .and_then(|s| s.cast::<ICoreWebView2Settings3>())
-                .and_then(|s3| s3.SetAreBrowserAcceleratorKeysEnabled(false));
-            if let Err(e) = off {
+            let settings = match wv.controller().CoreWebView2().and_then(|core| core.Settings()) {
+                Ok(s) => s,
+                Err(e) => return eprintln!("coomwall: webview settings unchanged: {e}"),
+            };
+            // Settings5 extends Settings3, so it also has the browser keys switch
+            let s5 = match settings.cast::<ICoreWebView2Settings5>() {
+                Ok(s) => s,
+                Err(e) => return eprintln!("coomwall: webview settings unchanged: {e}"),
+            };
+            if let Err(e) = s5.SetIsPinchZoomEnabled(false) {
+                eprintln!("coomwall: pinch zoom stays on: {e}");
+            }
+            #[cfg(not(debug_assertions))]
+            if let Err(e) = s5.SetAreBrowserAcceleratorKeysEnabled(false) {
                 eprintln!("coomwall: browser keys stay on: {e}");
             }
         });
         if let Err(e) = done {
-            eprintln!("coomwall: browser keys stay on: {e}");
+            eprintln!("coomwall: webview settings unchanged: {e}");
         }
     }
-    #[cfg(not(all(windows, not(debug_assertions))))]
+    #[cfg(not(windows))]
     let _ = w;
 }
 
@@ -105,7 +115,7 @@ pub fn run() {
             if let Some(dir) = &data_dir {
                 window = window.data_directory(dir.clone());
             }
-            browser_keys_off(&window.build()?);
+            webview_settings(&window.build()?);
             app.manage(walls::Template { config: cfg, data_dir });
             Ok(())
         })

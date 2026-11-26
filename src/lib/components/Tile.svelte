@@ -8,6 +8,7 @@
   import type { Media } from "$lib/queue.svelte";
   import type { Pan } from "$lib/session";
   import { I } from "$lib/icons";
+  import { Fingers, type Step } from "$lib/touch";
 
   interface Props {
     tile: TileState;
@@ -142,33 +143,53 @@
   const adjustable = $derived(fit === "cover" && (tile.pinned || !!tile.fixed));
   const pannable = $derived(adjustable && !!slack);
 
+  /** The pan that shows the item at zoom `z2` with the point of it now at
+   * (cx, cy) moved to (cx + dx, cy + dy), in px from the tile's corner, for
+   * a tile of w x h. Back at 1× the zoom is dropped. */
+  function zoomPan(z2: number, cx: number, cy: number, dx: number, dy: number, w: number, h: number): Pan | undefined {
+    const a = tile.media.aspect;
+    const from = tile.pan ?? { x: 50, y: 50 };
+    const z = from.z ?? 1;
+    z2 = Math.max(1, Math.min(ZOOM_MAX, z2));
+    const m = coverSize(w, h, a);
+    // A point u of the item (in its zoom-1 px) is drawn at p·(T − z·M) + z·u.
+    // Solve for the p that draws the same u at c + d at z2.
+    const axis = (T: number, M: number, p: number, c: number, d: number) => {
+      const u = (c - p * (T - z * M)) / z;
+      const s2 = T - z2 * M;
+      return s2 < -0.5 ? Math.max(0, Math.min(1, (c + d - z2 * u) / s2)) : p;
+    };
+    const x = Math.round(axis(w, m.w, from.x / 100, cx, dx) * 10000) / 100;
+    const y = Math.round(axis(h, m.h, from.y / 100, cy, dy) * 10000) / 100;
+    return z2 > 1.001 ? { x, y, z: Math.round(z2 * 1000) / 1000 } : x === 50 && y === 50 ? undefined : { x, y };
+  }
+
   /** Shift+wheel: zoom in or out by 1.2× a notch, keeping the point under
-   * the pointer where it is. Back at 1× the zoom is dropped. */
+   * the pointer where it is. */
   function wheel(e: WheelEvent) {
     if (!e.shiftKey || !adjustable) return;
     e.preventDefault();
     // with Shift, Chromium on Windows reports the wheel as horizontal
     const d = e.deltaY || e.deltaX;
-    const a = tile.media.aspect;
-    if (!d || !(a > 0)) return;
+    if (!d || !(tile.media.aspect > 0)) return;
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
     if (!box.width || !box.height) return;
-    const z = zoom;
-    const z2 = Math.max(1, Math.min(ZOOM_MAX, z * Math.pow(1.2, -d / 100)));
-    if (Math.abs(z2 - z) < 1e-3) return;
-    const m = coverSize(box.width, box.height, a);
-    const from = tile.pan ?? { x: 50, y: 50 };
-    // A point u of the item (in its zoom-1 px) is drawn at p·(T − z·M) + z·u.
-    // Solve for the p that draws the same u under the pointer at z2.
-    const axis = (T: number, M: number, p: number, c: number) => {
-      const u = (c - p * (T - z * M)) / z;
-      const s2 = T - z2 * M;
-      return s2 < -0.5 ? Math.max(0, Math.min(1, (c - z2 * u) / s2)) : p;
-    };
-    const x = Math.round(axis(box.width, m.w, from.x / 100, e.clientX - box.left) * 10000) / 100;
-    const y = Math.round(axis(box.height, m.h, from.y / 100, e.clientY - box.top) * 10000) / 100;
-    const zoomed = z2 > 1.001;
-    onpan(tile.id, zoomed ? { x, y, z: Math.round(z2 * 1000) / 1000 } : x === 50 && y === 50 ? undefined : { x, y });
+    const z2 = Math.max(1, Math.min(ZOOM_MAX, zoom * Math.pow(1.2, -d / 100)));
+    if (Math.abs(z2 - zoom) < 1e-3) return;
+    onpan(tile.id, zoomPan(z2, e.clientX - box.left, e.clientY - box.top, 0, 0, box.width, box.height));
+  }
+
+  // On a touchscreen, a pinned or center tile: one finger moves the visible
+  // part (Shift+drag), two pinch to zoom toward the point between them
+  // (Shift+wheel) and move it as they go.
+  const fingers = new Fingers();
+
+  function touchStep(st: Step, el: HTMLElement) {
+    if (fingers.travel > 6) dragged = true;
+    if (st.k === 1 && !slack) return;
+    const box = el.getBoundingClientRect();
+    if (!box.width || !box.height || !(tile.media.aspect > 0)) return;
+    onpan(tile.id, zoomPan(zoom * st.k, st.x - box.left, st.y - box.top, st.dx, st.dy, box.width, box.height));
   }
 
   let shift = $state(false);
@@ -180,8 +201,12 @@
   function down(e: PointerEvent) {
     shift = e.shiftKey;
     // 700 ms: longer than the system double-click time
-    if (e.timeStamp - lastDown > 700) dragged = false;
+    if (e.timeStamp - lastDown > 700 && !fingers.count) dragged = false;
     lastDown = e.timeStamp;
+    if (e.pointerType === "touch") {
+      if (adjustable) fingers.down(e);
+      return;
+    }
     if (!e.shiftKey || e.button !== 0 || !pannable) return;
     // no text selection, no compatibility mousedown
     e.preventDefault();
@@ -191,6 +216,8 @@
   }
 
   function move(e: PointerEvent) {
+    const step = fingers.move(e);
+    if (step) return touchStep(step, e.currentTarget as HTMLElement);
     shift = e.shiftKey;
     if (!drag || e.pointerId !== drag.pointer || !slack) return;
     const dx = e.clientX - drag.x;
@@ -203,6 +230,7 @@
   }
 
   function up(e: PointerEvent) {
+    if (fingers.up(e)) return;
     if (drag && e.pointerId === drag.pointer) drag = null;
   }
 

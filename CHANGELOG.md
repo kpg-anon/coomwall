@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Touchscreen gestures.** Two fingers pinch to zoom toward the point between them, and one finger drags: in the viewer, on a pinned tile or the center tile in Mosaic, Dynamic and Grid (as `Shift`+wheel and `Shift`+drag), and in Stack. A finger held still for about half a second pins or unpins the tile under it, or Stack's item, as `P` does; where there is nothing to pin (the viewer, Ribbon, Cascade, the center tile) it opens the item's menu. A quick tap with two fingers opens the item's menu, as a right-click does. WebView2's own pinch zoom of the whole page is turned off.
+- **Reset** (setup, at the top of Mode; with a wall on each display, next to the display tabs): puts the mode and every mode's settings, Show / Shape / Size, and Centered media (off, and its size) back to their defaults, on every display. The first click asks, a second click within 4 seconds resets. Your folders, the chosen centered file, Stack's file or link, and Playback and Layout in the right-hand column stay. It shows only while something differs from the defaults.
+
+### Fixed
+- **The setup page in a narrow window.** Below 1100 px wide (a display turned upright gives a window about 960 px wide) the Show, Shape, Size and Order choices ran out of the right-hand card and the mode names out of their cards. The right-hand card now goes under the main one in such a window. In a window too short for the page, the page scrolls and the Start button stays at the bottom of the window; before, it scrolled out of view.
+- With the right-click menu open, a click outside it also went on to whatever was under the pointer: in the viewer, a click on the background closed the menu and the viewer together. That click now only closes the menu.
+
 ## [1.0.4] — 2026-11-24
 
 ### Added

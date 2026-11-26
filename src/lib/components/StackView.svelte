@@ -6,7 +6,8 @@
   // drawing. A new item cross-fades in once its first frame is drawn.
   //
   // Shift+wheel zooms toward the pointer and Shift+drag moves the picture,
-  // in every pane at once; Shift+double-click puts it back.
+  // in every pane at once; Shift+double-click puts it back. On a
+  // touchscreen, two fingers pinch and one drags.
   import { untrack } from "svelte";
   import MediaView from "./MediaView.svelte";
   import SeekBar from "./SeekBar.svelte";
@@ -16,6 +17,7 @@
   import type { Settings } from "$lib/settings.svelte";
   import { LOAD_LIMIT_MS, type StackController } from "$lib/stack.svelte";
   import { I } from "$lib/icons";
+  import { Fingers, type Step } from "$lib/touch";
 
   interface Props {
     ctl: StackController;
@@ -192,32 +194,64 @@
     return { w: wide ? bh * a : bw, h: wide ? bh : bw / a };
   }
 
+  /** The pan that shows the item at zoom `z2` with its point now at
+   * client (cx, cy) moved by client (sx, sy), in pane `pane`. Back at 1× the
+   * zoom is dropped. */
+  function zoomPan(z2: number, cx: number, cy: number, sx: number, sy: number, pane: Element): Pan | undefined {
+    const f = frame({ clientX: cx, clientY: cy }, pane);
+    const t = (s.stackTurn * Math.PI) / 180;
+    // the movement in the item's own frame
+    const dx = Math.cos(t) * sx + Math.sin(t) * sy;
+    const dy = -Math.sin(t) * sx + Math.cos(t) * sy;
+    const m = cover(f.bw, f.bh);
+    const from = ctl.pan ?? { x: 50, y: 50 };
+    const z = from.z ?? 1;
+    z2 = Math.max(1, Math.min(ZOOM_MAX, z2));
+    const axis = (T: number, M: number, p: number, c: number, d: number) => {
+      const u = (c - p * (T - z * M)) / z;
+      const s2 = T - z2 * M;
+      return s2 < -0.5 ? Math.max(0, Math.min(1, (c + d - z2 * u) / s2)) : p;
+    };
+    const x = Math.round(axis(f.bw, m.w, from.x / 100, f.x, dx) * 10000) / 100;
+    const y = Math.round(axis(f.bh, m.h, from.y / 100, f.y, dy) * 10000) / 100;
+    return z2 > 1.001 ? { x, y, z: Math.round(z2 * 1000) / 1000 } : x === 50 && y === 50 ? undefined : { x, y };
+  }
+
   function wheel(e: WheelEvent) {
     if (!e.shiftKey || !ctl.item) return;
     e.preventDefault();
     const d = e.deltaY || e.deltaX;
     const pane = (e.target as Element).closest("canvas");
     if (!d || !pane) return;
-    const f = frame(e, pane);
-    const m = cover(f.bw, f.bh);
     const z = ctl.pan?.z ?? 1;
     const z2 = Math.max(1, Math.min(ZOOM_MAX, z * Math.pow(1.2, -d / 100)));
     if (Math.abs(z2 - z) < 1e-3) return;
-    const from = ctl.pan ?? { x: 50, y: 50 };
-    const axis = (T: number, M: number, p: number, c: number) => {
-      const u = (c - p * (T - z * M)) / z;
-      const s2 = T - z2 * M;
-      return s2 < -0.5 ? Math.max(0, Math.min(1, (c - z2 * u) / s2)) : p;
-    };
-    const x = Math.round(axis(f.bw, m.w, from.x / 100, f.x) * 10000) / 100;
-    const y = Math.round(axis(f.bh, m.h, from.y / 100, f.y) * 10000) / 100;
-    ctl.setPan(z2 > 1.001 ? { x, y, z: Math.round(z2 * 1000) / 1000 } : x === 50 && y === 50 ? undefined : { x, y });
+    ctl.setPan(zoomPan(z2, e.clientX, e.clientY, 0, 0, pane));
+  }
+
+  // On a touchscreen one finger moves the picture (Shift+drag) and two pinch
+  // to zoom toward the point between them (Shift+wheel), in every pane.
+  const fingers = new Fingers();
+  /** the pane the first finger went down on: the frame the fingers are read in */
+  let touchPane: Element | null = null;
+
+  function touchStep(st: Step) {
+    if (fingers.travel > 6) dragged = true;
+    if (!ctl.item || !touchPane) return;
+    ctl.setPan(zoomPan((ctl.pan?.z ?? 1) * st.k, st.x, st.y, st.dx, st.dy, touchPane));
   }
 
   let drag = $state.raw<{ id: number; x: number; y: number; from: Pan; pane: Element } | null>(null);
   let dragged = false;
 
   function down(e: PointerEvent) {
+    if (fingers.down(e)) {
+      if (fingers.count === 1) {
+        dragged = false;
+        touchPane = (e.target as Element).closest("canvas");
+      }
+      return;
+    }
     dragged = false;
     const pane = (e.target as Element).closest("canvas");
     if (!e.shiftKey || e.button !== 0 || !pane) return;
@@ -227,6 +261,8 @@
   }
 
   function move(e: PointerEvent) {
+    const step = fingers.move(e);
+    if (step) return touchStep(step);
     if (!drag || e.pointerId !== drag.id) return;
     const t = (s.stackTurn * Math.PI) / 180;
     const sx = e.clientX - drag.x;
@@ -246,6 +282,7 @@
   }
 
   function up(e: PointerEvent) {
+    if (fingers.up(e)) return;
     if (drag && e.pointerId === drag.id) drag = null;
   }
 

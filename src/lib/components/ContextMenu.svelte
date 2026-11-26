@@ -38,9 +38,40 @@
     onclose();
   }
 
+  /** Eat the click that ends the press which closed the menu. It comes
+   * after pointerup; if none comes (the press was a drag), stop waiting
+   * shortly after the pointer is released. */
+  function swallowClick(pointer: number) {
+    const click = (e: MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      done();
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const released = (e: PointerEvent) => {
+      if (e.pointerId === pointer) timer = setTimeout(done, 400);
+    };
+    const done = () => {
+      clearTimeout(timer);
+      window.removeEventListener("click", click, true);
+      window.removeEventListener("pointerup", released, true);
+      window.removeEventListener("pointercancel", released, true);
+    };
+    window.addEventListener("click", click, true);
+    window.addEventListener("pointerup", released, true);
+    window.addEventListener("pointercancel", released, true);
+  }
+
   onMount(() => {
+    // A press outside only closes the menu, as with Windows' own menus:
+    // it does not also reach the wall (in the viewer, a click on the
+    // background would close the viewer too). A right-click still goes on
+    // to open the menu again where it is.
     const away = (e: PointerEvent) => {
-      if (el && !el.contains(e.target as Node)) onclose();
+      if (!el || el.contains(e.target as Node)) return;
+      e.stopPropagation();
+      swallowClick(e.pointerId);
+      onclose();
     };
     window.addEventListener("pointerdown", away, true);
     window.addEventListener("blur", onclose);

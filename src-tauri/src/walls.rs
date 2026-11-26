@@ -76,7 +76,7 @@ pub async fn open_walls(app: AppHandle, template: State<'_, Template>, monitors:
             builder = builder.data_directory(dir.clone());
         }
         let w = builder.build().map_err(err)?;
-        crate::browser_keys_off(&w);
+        crate::webview_settings(&w);
         let (pos, size) = (m.position(), m.size());
         let placed = if windowed {
             let (at, sz) = window_rect(m);

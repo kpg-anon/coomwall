@@ -11,6 +11,7 @@ Everything the README leaves out: each mode's settings, every key, the preferenc
 - [Resuming a wall](#resuming-a-wall)
 - [Walls and other windows](#walls-and-other-windows)
 - [Right-click on an item](#right-click-on-an-item)
+- [Touchscreen](#touchscreen)
 - [Keys on the wall](#keys-on-the-wall)
 - [Graphics adapter](#graphics-adapter)
 - [Color](#color)
@@ -26,7 +27,7 @@ Everything the README leaves out: each mode's settings, every key, the preferenc
 
 The right-hand column also holds playback speed, image duration, a maximum video length (up to 10 minutes; longer videos are skipped in every mode; 0 = no limit), looping short clips, gap and crop limit. The cog at the top right opens **Preferences**, in tabs (General, Behavior, Keyboard, Grid, System): theme, what happens under the pointer, when the wall pauses by itself, controls hide time, hiding the top and bottom bars (on the wall, in the viewer) and the viewer's video controls, volume, keeping the wall on top, graphics adapter, color, the speed keys, and a list of every key. Every setting is remembered. Hovering a setting's name (dotted underline) shows what it does. A slider or choice that is not at its default shows a small ↺ beside it that puts the default back, and Preferences has **Restore defaults** for everything in it.
 
-Everything on the setup page has a fixed place: picking another mode changes only what is in the mode's settings box, never where anything else is. In a larger window the cards and that box grow; at the default 1180×820 everything fits without scrolling. The version is shown next to the name.
+Everything on the setup page has a fixed place: picking another mode changes only what is in the mode's settings box, never where anything else is. In a larger window the cards and that box grow; at the default 1180×820 everything fits without scrolling. **Reset**, at the top of Mode (with a wall on each display, next to the display tabs), puts the mode and every mode's settings, Show / Shape / Size, and Centered media (off, and its size) back to their defaults on every display; click it twice. It keeps your folders, the chosen centered file, Stack's file or link, and Playback and Layout. In a window narrower than 1100 px (a display turned upright gives about 960) the right-hand column goes under the main one. In a window too short for the page, the page scrolls and the Start button stays at the bottom of the window. The version is shown next to the name.
 
 ## Grid layouts
 
@@ -130,7 +131,20 @@ If you want the walls above everything else, turn on **Keep the wall above other
 
 ## Right-click on an item
 
-**Show in Explorer**, **Open in default app**, **Make it the centered media**, **Previous item** and **Next item** (in a tile of Mosaic, Dynamic or Grid, like `B` and `N`), **Remove from wall** (gone until you go back to setup) and **Never show again**. Never show again saves the file to a list that scanning skips; setup shows how many files are hidden, and you can unhide them one by one or all at once.
+A click outside the menu only closes it. **Show in Explorer**, **Open in default app**, **Make it the centered media**, **Previous item** and **Next item** (in a tile of Mosaic, Dynamic or Grid, like `B` and `N`), **Remove from wall** (gone until you go back to setup) and **Never show again**. Never show again saves the file to a list that scanning skips; setup shows how many files are hidden, and you can unhide them one by one or all at once.
+
+## Touchscreen
+
+| Gesture | Does |
+| --- | --- |
+| two fingers, pinch | zoom toward the point between them; moving both fingers moves the picture. In the viewer; on a pinned tile or the center tile in Mosaic, Dynamic and Grid (as `Shift`+wheel); in Stack, every pane at once |
+| one finger, drag | move the picture: in the viewer while zoomed in, on a pinned or center tile while it is cropped or zoomed (as `Shift`+drag), in Stack |
+| double tap | as a double-click: open the item whole, or in the viewer zoom in and back |
+| tap | in the viewer: play or pause the video, or close the viewer when you tap outside the item |
+| hold one finger still (about half a second) | pin or unpin the tile under it, or Stack's item, as `P`. Where there is nothing to pin (the viewer, Ribbon, Cascade, the center tile) it opens the item's menu |
+| quick tap with two fingers | the item's menu, as a right-click |
+
+A pinch never zooms the page itself.
 
 ## Keys on the wall
 
